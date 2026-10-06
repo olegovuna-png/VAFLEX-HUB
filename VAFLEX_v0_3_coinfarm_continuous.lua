@@ -2503,24 +2503,73 @@ local function SetupMovementPage()
             or string.find(name, "_coin", 1, true) ~= nil
     end
 
-    local function ResolveCoinPart(object)
+    local function ResolveCoinPart(object, rootPos)
         if not object or not object.Parent then return nil end
-        if object:IsA("BasePart") then return object end
 
-        if object:IsA("Model") and object.PrimaryPart then
-            return object.PrimaryPart
+        -- Pick a REAL world pickup part, not a model pivot/helper stored in the sky.
+        -- Every candidate must have map geometry close underneath it.
+        local rayParams = RaycastParams.new()
+        rayParams.FilterType = Enum.RaycastFilterType.Exclude
+        rayParams.FilterDescendantsInstances = { LocalPlayer.Character }
+
+        local function Supported(part)
+            if not part or not part.Parent or not part:IsA("BasePart") then return false end
+            local pos = part.Position
+            if pos.X ~= pos.X or pos.Y ~= pos.Y or pos.Z ~= pos.Z then return false end
+            if math.abs(pos.X) >= 1000000 or math.abs(pos.Y) >= 1000000 or math.abs(pos.Z) >= 1000000 then return false end
+
+            -- Start below the centre of the pickup so the ray does not simply hit
+            -- the coin itself. Real coins normally have floor/table/stairs nearby.
+            local halfY = math.max(0.25, part.Size.Y * 0.5)
+            local result = workspace:Raycast(
+                pos - Vector3.new(0, halfY + 0.05, 0),
+                Vector3.new(0, -24, 0),
+                rayParams
+            )
+            return result ~= nil
         end
 
+        if object:IsA("BasePart") then
+            return Supported(object) and object or nil
+        end
+
+        local bestPart = nil
+        local bestTier = math.huge
+        local bestDistanceSq = math.huge
+
         for _, child in ipairs(object:GetDescendants()) do
-            if child:IsA("BasePart") then
+            if child:IsA("BasePart") and Supported(child) then
                 local n = string.lower(child.Name)
-                if n == "coin" or n == "coin_server" or n == "coinvisual" or n == "coinpart" then
-                    return child
+                local named = n == "coin" or n == "coin_server" or n == "coinvisual" or n == "coinpart"
+                    or string.find(n, "coin_", 1, true) == 1
+                    or string.find(n, "_coin", 1, true) ~= nil
+                local visible = child.Transparency < 0.95
+                local touchable = child.CanTouch
+                local smallEnough = child.Size.Magnitude <= 35
+
+                local tier
+                if visible and named and smallEnough then tier = 1
+                elseif visible and smallEnough then tier = 2
+                elseif touchable and named and smallEnough then tier = 3
+                elseif touchable and smallEnough then tier = 4
+                elseif named and smallEnough then tier = 5
+                else tier = 6 end
+
+                local distanceSq = 0
+                if rootPos then
+                    local d = child.Position - rootPos
+                    distanceSq = d:Dot(d)
+                end
+
+                if tier < bestTier or (tier == bestTier and distanceSq < bestDistanceSq) then
+                    bestTier = tier
+                    bestDistanceSq = distanceSq
+                    bestPart = child
                 end
             end
         end
 
-        return object:FindFirstChildWhichIsA("BasePart", true)
+        return bestPart
     end
 
     local function AddCoinCandidate(object)
@@ -2570,7 +2619,7 @@ local function SetupMovementPage()
             if not object or not object.Parent or not object:IsDescendantOf(workspace) then
                 MovementState.CoinCache[object] = nil
             else
-                local part = ResolveCoinPart(object)
+                local part = ResolveCoinPart(object, rootPos)
                 if part and not seenParts[part] and TargetStillValid(part) then
                     seenParts[part] = true
                     validCount += 1
@@ -2591,7 +2640,7 @@ local function SetupMovementPage()
         end
 
         MovementState.CoinHasCoins = validCount > 0
-        return bestPart, math.sqrt(bestDistanceSq)
+        return bestPart, bestPart and math.sqrt(bestDistanceSq) or math.huge
     end
 
     local function StopCoinFarmMotion()
@@ -3373,7 +3422,7 @@ local function SetupMovementPage()
             -- Re-evaluate nearest target at 25 Hz. This also means a newly spawned
             -- closer coin can become the target almost immediately.
             if not TargetStillValid(target) or now >= MovementState.CoinNextRetarget then
-                MovementState.CoinNextRetarget = now + 0.04
+                MovementState.CoinNextRetarget = now + 0.05
                 MovementState.CoinTarget = FindNearestCoin(root)
                 target = MovementState.CoinTarget
             end
@@ -3389,7 +3438,7 @@ local function SetupMovementPage()
                     MovementState.CoinIgnoreUntil[target] = now + 0.20
                     MovementState.CoinTarget = FindNearestCoin(root)
                     MovementState.CoinTargetReachedAt = 0
-                    MovementState.CoinNextRetarget = now + 0.04
+                    MovementState.CoinNextRetarget = now + 0.05
                     target = MovementState.CoinTarget
                 end
             else
@@ -3520,13 +3569,18 @@ local function SetupMovementPage()
                                 MovementState.CoinLastDirection = dir
                                 speed = math.clamp(tonumber(Config.CoinFarmSpeed) or 22, 1, 100)
 
-                                -- Keep the Humanoid upright. Only yaw follows the coin;
-                                -- vertical travel is handled by BodyVelocity.
+                                -- Keep the player upright and stop bad targets from launching
+                                -- the character vertically. Horizontal motion stays full-speed;
+                                -- Y is handled separately with a conservative cap.
                                 local flat = Vector3.new(dir.X, 0, dir.Z)
                                 if flat.Magnitude > 0.001 then
                                     facing = CFrame.lookAt(root.Position, root.Position + flat.Unit)
+                                    local horizontal = flat.Unit * speed
+                                    local vertical = math.clamp(offset.Y * 4, -24, 24)
+                                    dir = Vector3.new(horizontal.X / speed, vertical / speed, horizontal.Z / speed)
                                 else
                                     facing = root.CFrame
+                                    dir = Vector3.new(0, math.clamp(offset.Y * 4, -24, 24) / speed, 0)
                                 end
                             else
                                 dir = Vector3.zero
