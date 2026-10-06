@@ -2199,6 +2199,7 @@ local function SetupMovementPage()
         CoinLastDirection = Vector3.zero,
         CoinHasCoins = false,
         CoinTargetReachedAt = 0,
+        CoinNextRetarget = 0,
         CoinFarmPreviousFly = false,
         CoinFarmPreviousNoclip = false,
         CoinFarmOwnsMovement = false,
@@ -2381,6 +2382,7 @@ local function SetupMovementPage()
         MovementState.CoinLastDirection = Vector3.zero
         MovementState.CoinHasCoins = false
         MovementState.CoinTargetReachedAt = 0
+        MovementState.CoinNextRetarget = 0
         MovementState.NoclipOriginal = setmetatable({}, { __mode = "k" })
         MovementState.FlyVelocity = nil
         MovementState.FlyGyro = nil
@@ -2498,6 +2500,7 @@ local function SetupMovementPage()
             or name == "coinvisual"
             or name == "coinpart"
             or string.find(name, "coin_", 1, true) == 1
+            or string.find(name, "_coin", 1, true) ~= nil
     end
 
     local function ResolveCoinPart(object)
@@ -2544,7 +2547,9 @@ local function SetupMovementPage()
         local p = target.Position
         if p.X ~= p.X or p.Y ~= p.Y or p.Z ~= p.Z then return false end
         if math.abs(p.X) > 1000000 or math.abs(p.Y) > 1000000 or math.abs(p.Z) > 1000000 then return false end
-        if target.Transparency >= 0.995 then return false end
+
+        -- Do NOT reject invisible parts here. Many coin systems use an invisible
+        -- pickup/hitbox BasePart with the visible mesh welded or parented to it.
         return true
     end
 
@@ -2594,6 +2599,7 @@ local function SetupMovementPage()
         MovementState.CoinLastDirection = Vector3.zero
         MovementState.CoinHasCoins = false
         MovementState.CoinTargetReachedAt = 0
+        MovementState.CoinNextRetarget = 0
         table.clear(MovementState.CoinIgnoreUntil)
 
         if MovementState.FlyVelocity and MovementState.FlyVelocity.Parent then
@@ -2638,6 +2644,7 @@ local function SetupMovementPage()
             MovementState.CoinLastDirection = Vector3.zero
             MovementState.CoinHasCoins = false
             MovementState.CoinTargetReachedAt = 0
+            MovementState.CoinNextRetarget = 0
 
             SetFlyEnabled(true)
             SetNoclipEnabled(true)
@@ -2663,6 +2670,9 @@ local function SetupMovementPage()
 
     Connect(workspace.DescendantAdded, function(object)
         AddCoinCandidate(object)
+        if Config.CoinFarmEnabled then
+            MovementState.CoinNextRetarget = 0
+        end
     end)
 
     Connect(workspace.DescendantRemoving, function(object)
@@ -3352,17 +3362,19 @@ local function SetupMovementPage()
             MovementState.LastGroundedAt = os.clock()
         end
 
-        -- Coin Farm: lock the true nearest coin, fly to it, then select the
-        -- next nearest from the character's NEW position. No visited-list ordering.
+        -- Coin Farm: always follow the ACTUAL nearest valid coin.
+        -- We only scan the small event-driven CoinCache, never the full Workspace here.
         if Config.CoinFarmEnabled then
             UpdateCoinFarmForcedStates()
 
             local now = os.clock()
             local target = MovementState.CoinTarget
 
-            if not TargetStillValid(target) then
+            -- Re-evaluate nearest target at 25 Hz. This also means a newly spawned
+            -- closer coin can become the target almost immediately.
+            if not TargetStillValid(target) or now >= MovementState.CoinNextRetarget then
+                MovementState.CoinNextRetarget = now + 0.04
                 MovementState.CoinTarget = FindNearestCoin(root)
-                MovementState.CoinTargetReachedAt = 0
                 target = MovementState.CoinTarget
             end
 
@@ -3370,30 +3382,29 @@ local function SetupMovementPage()
                 local offset = target.Position - root.Position
                 local distance = offset.Magnitude
 
-                -- Only treat the coin as reached when the root is actually close.
-                -- A tiny grace period lets the game's own pickup logic remove it.
-                if distance <= 1.35 then
-                    if MovementState.CoinTargetReachedAt == 0 then
-                        MovementState.CoinTargetReachedAt = now
-                    elseif now - MovementState.CoinTargetReachedAt >= 0.10 then
-                        MovementState.CoinIgnoreUntil[target] = now + 0.22
-                        MovementState.CoinTarget = FindNearestCoin(root)
-                        MovementState.CoinTargetReachedAt = 0
-                    end
-                else
+                -- Once we physically enter the pickup area, immediately move on to
+                -- the next nearest coin. Temporarily ignore this hitbox because some
+                -- games remove collected coins a few frames later.
+                if distance == distance and distance <= 2.0 then
+                    MovementState.CoinIgnoreUntil[target] = now + 0.20
+                    MovementState.CoinTarget = FindNearestCoin(root)
                     MovementState.CoinTargetReachedAt = 0
+                    MovementState.CoinNextRetarget = now + 0.04
+                    target = MovementState.CoinTarget
                 end
             else
                 MovementState.CoinTargetReachedAt = 0
-                if not MovementState.CoinHasCoins then
-                    MovementState.CoinLastDirection = Vector3.zero
-                end
+            end
+
+            if not TargetStillValid(MovementState.CoinTarget) and not MovementState.CoinHasCoins then
+                MovementState.CoinLastDirection = Vector3.zero
             end
         else
             MovementState.CoinTarget = nil
             MovementState.CoinLastDirection = Vector3.zero
             MovementState.CoinHasCoins = false
             MovementState.CoinTargetReachedAt = 0
+            MovementState.CoinNextRetarget = 0
             table.clear(MovementState.CoinIgnoreUntil)
         end
 
@@ -3522,17 +3533,10 @@ local function SetupMovementPage()
                                 speed = 0
                             end
                         end
-                    elseif MovementState.CoinHasCoins and MovementState.CoinLastDirection.Magnitude > 0.001 then
-                        dir = MovementState.CoinLastDirection.Unit
-                        speed = math.clamp(tonumber(Config.CoinFarmSpeed) or 22, 1, 100)
-
-                        local flat = Vector3.new(dir.X, 0, dir.Z)
-                        if flat.Magnitude > 0.001 then
-                            facing = CFrame.lookAt(root.Position, root.Position + flat.Unit)
-                        else
-                            facing = root.CFrame
-                        end
                     else
+                        -- No current valid target: hold position. We never reuse a stale
+                        -- direction because that can send the character away from the map
+                        -- while a coin is being removed/replaced.
                         dir = Vector3.zero
                         speed = 0
                     end
