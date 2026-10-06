@@ -1,5 +1,5 @@
 --// ============================================================
---// VAFLEX HUB v0.3 - Coin Farm Continuous Chain Collection
+--// VAFLEX HUB v0.3 - Safe Fly Exit + Coin Farm Rebuilt
 --// Base: v0.3
 --// Visual -> Game ESP / Menu
 --// ============================================================
@@ -2195,12 +2195,13 @@ local function SetupMovementPage()
         CoinFarmWalkRestore = 16,
         CoinTarget = nil,
         CoinCache = setmetatable({}, { __mode = "k" }),
-        CoinIgnoreUntil = setmetatable({}, { __mode = "k" }),
+        CoinVisited = setmetatable({}, { __mode = "k" }),
         CoinLastDirection = Vector3.zero,
+        CoinHasCoins = false,
+        CoinRecycleAt = 0,
         CoinFarmPreviousFly = false,
         CoinFarmPreviousNoclip = false,
         CoinFarmOwnsMovement = false,
-        CoinNextRetarget = 0,
         NoclipOriginal = setmetatable({}, { __mode = "k" }),
         FlyVelocity = nil,
         FlyGyro = nil,
@@ -2228,6 +2229,34 @@ local function SetupMovementPage()
     end
 
     local function DestroyFlyControllers()
+        local humanoid = MovementState.Humanoid
+        local root = MovementState.Root
+
+        -- Release PlatformStand BEFORE removing the movers. This avoids the
+        -- one-frame physics/ragdoll drop that could happen on Fly OFF.
+        if humanoid and humanoid.Parent and MovementState.FlyApplied then
+            pcall(function()
+                humanoid.PlatformStand = MovementState.PlatformStandRestore == true
+            end)
+        end
+
+        -- Stabilize the character while handing control back to Humanoid.
+        if root and root.Parent then
+            pcall(function()
+                root.AssemblyAngularVelocity = Vector3.zero
+
+                local velocity = root.AssemblyLinearVelocity
+                local safeY = math.max(velocity.Y, 0)
+                root.AssemblyLinearVelocity = Vector3.new(velocity.X, safeY, velocity.Z)
+
+                local look = root.CFrame.LookVector
+                local flat = Vector3.new(look.X, 0, look.Z)
+                if flat.Magnitude > 0.001 then
+                    root.CFrame = CFrame.lookAt(root.Position, root.Position + flat.Unit)
+                end
+            end)
+        end
+
         if MovementState.FlyVelocity then
             pcall(function() MovementState.FlyVelocity:Destroy() end)
             MovementState.FlyVelocity = nil
@@ -2237,12 +2266,16 @@ local function SetupMovementPage()
             MovementState.FlyGyro = nil
         end
 
-        local humanoid = MovementState.Humanoid
         if humanoid and humanoid.Parent and MovementState.FlyApplied then
             pcall(function()
-                humanoid.PlatformStand = MovementState.PlatformStandRestore
+                if humanoid.FloorMaterial == Enum.Material.Air then
+                    humanoid:ChangeState(Enum.HumanoidStateType.Freefall)
+                else
+                    humanoid:ChangeState(Enum.HumanoidStateType.Running)
+                end
             end)
         end
+
         MovementState.FlyApplied = false
     end
 
@@ -2344,8 +2377,10 @@ local function SetupMovementPage()
         MovementState.CoinFarmWalkApplied = false
         MovementState.CoinFarmWalkRestore = 16
         MovementState.CoinTarget = nil
-        MovementState.CoinIgnoreUntil = setmetatable({}, { __mode = "k" })
+        MovementState.CoinVisited = setmetatable({}, { __mode = "k" })
         MovementState.CoinLastDirection = Vector3.zero
+        MovementState.CoinHasCoins = false
+        MovementState.CoinRecycleAt = 0
         MovementState.NoclipOriginal = setmetatable({}, { __mode = "k" })
         MovementState.FlyVelocity = nil
         MovementState.FlyGyro = nil
@@ -2392,6 +2427,7 @@ local function SetupMovementPage()
     end
 
     local function SetFlyEnabled(value)
+        value = value == true
         Config.FlyEnabled = value
 
         if value then
@@ -2403,37 +2439,36 @@ local function SetupMovementPage()
             end
         else
             DestroyFlyControllers()
-            if MovementState.Root and MovementState.Root.Parent then
-                MovementState.Root.AssemblyAngularVelocity = Vector3.zero
-                local velocity = MovementState.Root.AssemblyLinearVelocity
-                MovementState.Root.AssemblyLinearVelocity = Vector3.new(velocity.X, 0, velocity.Z)
+
+            local humanoid, root = GetCharacterParts()
+            if root and root.Parent then
+                root.AssemblyAngularVelocity = Vector3.zero
+            end
+
+            -- If no other movement feature owns rotation, return it immediately
+            -- instead of waiting for the next Heartbeat.
+            if humanoid and MovementState.RotationApplied
+                and not Config.SpinEnabled
+                and not Config.StrafeEnabled
+                and not Config.AirStrafeEnabled then
+                humanoid.AutoRotate = MovementState.AutoRotateRestore
+                MovementState.RotationApplied = false
             end
         end
     end
 
     local function SetNoclipEnabled(value)
-        Config.NoclipEnabled = value
-
-        -- Coin Farm switches route strategy instantly when Noclip changes.
-        -- ON  = direct line to the coin, no PathfindingService detours.
-        -- OFF = normal navmesh/pathfinding with obstacle avoidance.
-        if Config.CoinFarmEnabled then
-            MovementState.CoinTarget = nil
-            local humanoid, root = GetCharacterParts()
-            if humanoid and root then
-                pcall(function()
-                    humanoid:MoveTo(root.Position)
-                end)
-            end
+        Config.NoclipEnabled = value == true
+        if not Config.NoclipEnabled then
+            RestoreNoclip()
         end
-
-        if not value then RestoreNoclip() end
     end
 
 
-    -- Auto Coin Farm: direct flight to the globally-nearest coin.
-    -- Enabling the farm automatically enables Fly + Noclip.
-    -- The cache is event-driven, so when there are no coins there is no Workspace rescan loop.
+    -- Auto Coin Farm rebuilt from zero.
+    -- Stable rule: choose the nearest coin, commit to it, fly through it,
+    -- immediately choose the next nearest coin, and stop ONLY when no coins exist.
+    -- Coin discovery is event-driven after one initial cache build.
     local function IsInsideCharacter(object)
         local model = object and object:FindFirstAncestorOfClass("Model")
         return model and model:FindFirstChildOfClass("Humanoid") ~= nil
@@ -2468,15 +2503,10 @@ local function SetupMovementPage()
 
     local function ResolveCoinPart(object)
         if not object or not object.Parent then return nil end
-
-        if object:IsA("BasePart") then
-            return object
-        end
-
+        if object:IsA("BasePart") then return object end
         if object:IsA("Model") then
             return object.PrimaryPart or object:FindFirstChildWhichIsA("BasePart", true)
         end
-
         return object:FindFirstChildWhichIsA("BasePart", true)
     end
 
@@ -2490,17 +2520,25 @@ local function SetupMovementPage()
 
     local function RebuildCoinCache()
         table.clear(MovementState.CoinCache)
+        table.clear(MovementState.CoinVisited)
         for _, object in ipairs(workspace:GetDescendants()) do
             AddCoinCandidate(object)
         end
     end
 
+    local function TargetStillValid(target)
+        return target
+            and target.Parent
+            and target:IsDescendantOf(workspace)
+    end
+
     local function FindNearestCoin(root)
         local bestPart = nil
         local bestDistance = math.huge
+        local validCount = 0
         local seenParts = {}
-        local now = os.clock()
 
+        -- First pass: only coins not yet passed through in the current chain.
         for object in pairs(MovementState.CoinCache) do
             if not object or not object.Parent or not object:IsDescendantOf(workspace) then
                 MovementState.CoinCache[object] = nil
@@ -2508,14 +2546,8 @@ local function SetupMovementPage()
                 local part = ResolveCoinPart(object)
                 if part and part.Parent and part:IsDescendantOf(workspace) and not seenParts[part] then
                     seenParts[part] = true
-
-                    local ignoreUntil = MovementState.CoinIgnoreUntil[part]
-                    if ignoreUntil and ignoreUntil <= now then
-                        MovementState.CoinIgnoreUntil[part] = nil
-                        ignoreUntil = nil
-                    end
-
-                    if not ignoreUntil then
+                    validCount += 1
+                    if not MovementState.CoinVisited[part] then
                         local distance = (part.Position - root.Position).Magnitude
                         if distance < bestDistance then
                             bestDistance = distance
@@ -2526,19 +2558,16 @@ local function SetupMovementPage()
             end
         end
 
+        MovementState.CoinHasCoins = validCount > 0
         return bestPart, bestDistance
-    end
-
-    local function TargetStillValid(target)
-        return target
-            and target.Parent
-            and target:IsDescendantOf(workspace)
     end
 
     local function StopCoinFarmMotion()
         MovementState.CoinTarget = nil
-        MovementState.CoinNextRetarget = 0
         MovementState.CoinLastDirection = Vector3.zero
+        MovementState.CoinHasCoins = false
+        MovementState.CoinRecycleAt = 0
+        table.clear(MovementState.CoinVisited)
 
         if MovementState.FlyVelocity and MovementState.FlyVelocity.Parent then
             MovementState.FlyVelocity.Velocity = Vector3.zero
@@ -2548,8 +2577,6 @@ local function SetupMovementPage()
     local function UpdateCoinFarmForcedStates()
         if not Config.CoinFarmEnabled then return end
 
-        -- Config loading can turn Coin Farm on without going through its toggle callback.
-        -- Capture the previous manual states the first time the farm takes ownership.
         if not MovementState.CoinFarmOwnsMovement then
             MovementState.CoinFarmPreviousFly = Config.FlyEnabled
             MovementState.CoinFarmPreviousNoclip = Config.NoclipEnabled
@@ -2585,19 +2612,15 @@ local function SetupMovementPage()
         if value then
             RebuildCoinCache()
             MovementState.CoinTarget = nil
-            MovementState.CoinNextRetarget = 0
             MovementState.CoinLastDirection = Vector3.zero
-            table.clear(MovementState.CoinIgnoreUntil)
+            MovementState.CoinHasCoins = false
+            MovementState.CoinRecycleAt = 0
 
             SetFlyEnabled(true)
             SetNoclipEnabled(true)
 
-            if UIControls.FlySwitch then
-                UIControls.FlySwitch:SetInstant(true, false)
-            end
-            if UIControls.NoclipSwitch then
-                UIControls.NoclipSwitch:SetInstant(true, false)
-            end
+            if UIControls.FlySwitch then UIControls.FlySwitch:SetInstant(true, false) end
+            if UIControls.NoclipSwitch then UIControls.NoclipSwitch:SetInstant(true, false) end
         else
             StopCoinFarmMotion()
 
@@ -2609,21 +2632,20 @@ local function SetupMovementPage()
                 SetFlyEnabled(restoreFly)
                 SetNoclipEnabled(restoreNoclip)
 
-                if UIControls.FlySwitch then
-                    UIControls.FlySwitch:SetInstant(restoreFly, false)
-                end
-                if UIControls.NoclipSwitch then
-                    UIControls.NoclipSwitch:SetInstant(restoreNoclip, false)
-                end
+                if UIControls.FlySwitch then UIControls.FlySwitch:SetInstant(restoreFly, false) end
+                if UIControls.NoclipSwitch then UIControls.NoclipSwitch:SetInstant(restoreNoclip, false) end
             end
         end
     end
 
     Connect(workspace.DescendantAdded, function(object)
-        if not Config.CoinFarmEnabled then return end
-
-        -- Keep the cache current, but never steal an already locked target.
         AddCoinCandidate(object)
+        -- Do not steal a valid target. New coins participate as soon as the
+        -- current coin is crossed or disappears.
+        if Config.CoinFarmEnabled and not TargetStillValid(MovementState.CoinTarget) then
+            MovementState.CoinTarget = nil
+            MovementState.CoinRecycleAt = 0
+        end
     end)
 
     Connect(workspace.DescendantRemoving, function(object)
@@ -2637,10 +2659,8 @@ local function SetupMovementPage()
                     removedTarget = target:IsDescendantOf(object)
                 end)
             end
-
             if removedTarget or not target.Parent then
                 MovementState.CoinTarget = nil
-                MovementState.CoinNextRetarget = 0
             end
         end
     end)
@@ -3315,21 +3335,51 @@ local function SetupMovementPage()
             MovementState.LastGroundedAt = os.clock()
         end
 
-        -- Coin Farm uses target-lock instead of constantly changing its mind.
-        -- It chooses the nearest coin only when there is no valid current target,
-        -- then flies to that exact coin until Roblox removes/collects it. Only then
-        -- is the next nearest coin selected. Newly spawned closer coins do NOT steal
-        -- the target mid-flight, which removes zig-zagging and fake pickup attempts.
+        -- Coin Farm chain controller rebuilt as a small state machine.
+        -- A target is never changed while it is valid. After passing through it,
+        -- the next nearest untouched coin is selected immediately. If Roblox keeps
+        -- collected coins replicated for a moment, keep flying instead of stopping,
+        -- then recycle the visited set after a short grace period.
         if Config.CoinFarmEnabled then
             UpdateCoinFarmForcedStates()
 
-            if not TargetStillValid(MovementState.CoinTarget) then
+            local now = os.clock()
+            local target = MovementState.CoinTarget
+
+            if not TargetStillValid(target) then
                 MovementState.CoinTarget = FindNearestCoin(root)
+                target = MovementState.CoinTarget
+
+                if not target and MovementState.CoinHasCoins and now >= MovementState.CoinRecycleAt then
+                    table.clear(MovementState.CoinVisited)
+                    MovementState.CoinTarget = FindNearestCoin(root)
+                    target = MovementState.CoinTarget
+                end
+            end
+
+            if TargetStillValid(target) then
+                local distance = (target.Position - root.Position).Magnitude
+                local passRadius = math.max(3.25, Config.CoinFarmSpeed * delta * 1.35)
+
+                if distance <= passRadius then
+                    MovementState.CoinVisited[target] = true
+                    MovementState.CoinTarget = nil
+                    MovementState.CoinRecycleAt = now + 0.14
+
+                    -- Chain directly into the next nearest untouched coin in this
+                    -- same Heartbeat, so BodyVelocity never gets a zero-speed frame.
+                    MovementState.CoinTarget = FindNearestCoin(root)
+                    target = MovementState.CoinTarget
+                end
+            elseif not MovementState.CoinHasCoins then
+                MovementState.CoinLastDirection = Vector3.zero
             end
         else
             MovementState.CoinTarget = nil
-            MovementState.CoinNextRetarget = 0
             MovementState.CoinLastDirection = Vector3.zero
+            MovementState.CoinHasCoins = false
+            MovementState.CoinRecycleAt = 0
+            table.clear(MovementState.CoinVisited)
         end
 
         -- WalkSpeed
@@ -3435,22 +3485,24 @@ local function SetupMovementPage()
 
                     if TargetStillValid(target) then
                         local offset = target.Position - root.Position
-
-                        if offset.Magnitude > 0.05 then
+                        if offset.Magnitude > 0.01 then
                             dir = offset.Unit
                             MovementState.CoinLastDirection = dir
                             facing = CFrame.lookAt(root.Position, root.Position + dir)
                             speed = Config.CoinFarmSpeed
-                        else
-                            -- We reached the selected coin. Hold position on it until the
-                            -- game confirms collection by removing it; do not chase another
-                            -- coin early and do not oscillate between nearby coins.
-                            dir = Vector3.zero
-                            facing = root.CFrame
-                            speed = 0
                         end
+                    elseif MovementState.CoinHasCoins and MovementState.CoinLastDirection.Magnitude > 0.001 then
+                        -- A target can disappear between acquisition and physics update.
+                        -- Keep the previous flight vector for that single transition frame
+                        -- instead of producing a visible stop.
+                        dir = MovementState.CoinLastDirection.Unit
+                        facing = CFrame.lookAt(root.Position, root.Position + dir)
+                        speed = Config.CoinFarmSpeed
                     else
-                        MovementState.CoinLastDirection = Vector3.zero
+                        -- No coins currently exist anywhere in the cache: this is the only
+                        -- situation where the farmer deliberately stops.
+                        dir = Vector3.zero
+                        speed = 0
                     end
                 elseif camera then
                     if UserInputService.KeyboardEnabled then
