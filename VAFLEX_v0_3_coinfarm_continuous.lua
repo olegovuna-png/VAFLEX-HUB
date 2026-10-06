@@ -2622,20 +2622,26 @@ local function SetupMovementPage()
     Connect(workspace.DescendantAdded, function(object)
         if not Config.CoinFarmEnabled then return end
 
+        -- Keep the cache current, but never steal an already locked target.
         AddCoinCandidate(object)
-
-        -- Force an immediate nearest-target check when a new coin appears.
-        -- If it is closer than the current target, the next Heartbeat switches to it.
-        MovementState.CoinNextRetarget = 0
     end)
 
     Connect(workspace.DescendantRemoving, function(object)
         MovementState.CoinCache[object] = nil
 
         local target = MovementState.CoinTarget
-        if target == object or (target and not target.Parent) then
-            MovementState.CoinTarget = nil
-            MovementState.CoinNextRetarget = 0
+        if target then
+            local removedTarget = target == object
+            if not removedTarget then
+                pcall(function()
+                    removedTarget = target:IsDescendantOf(object)
+                end)
+            end
+
+            if removedTarget or not target.Parent then
+                MovementState.CoinTarget = nil
+                MovementState.CoinNextRetarget = 0
+            end
         end
     end)
 
@@ -3126,14 +3132,54 @@ local function SetupMovementPage()
     UIControls.StrafeSwitch = MakeMovementRow(
         WalkBody, 0, "Strafe", "Instantly face your movement direction",
         Config.StrafeEnabled,
-        function(value) Config.StrafeEnabled = value end,
+        function(value)
+            Config.StrafeEnabled = value
+
+            -- Restore normal Humanoid rotation immediately when this strafe mode
+            -- is no longer responsible for the current grounded/air state.
+            if not value then
+                local humanoid, root = GetCharacterParts()
+                if humanoid and root then
+                    local groundedNow = humanoid.FloorMaterial ~= Enum.Material.Air
+                    local stillNeedsManualRotation = Config.FlyEnabled
+                        or Config.SpinEnabled
+                        or (groundedNow and Config.StrafeEnabled)
+                        or ((not groundedNow) and Config.AirStrafeEnabled)
+
+                    if not stillNeedsManualRotation then
+                        humanoid.AutoRotate = MovementState.AutoRotateRestore
+                        MovementState.RotationApplied = false
+                        root.AssemblyAngularVelocity = Vector3.zero
+                    end
+                end
+            end
+        end,
         nil
     )
 
     UIControls.AirStrafeSwitch = MakeMovementRow(
         WalkBody, 52, "AirStrafe", "Instant turning while airborne",
         Config.AirStrafeEnabled,
-        function(value) Config.AirStrafeEnabled = value end,
+        function(value)
+            Config.AirStrafeEnabled = value
+
+            if not value then
+                local humanoid, root = GetCharacterParts()
+                if humanoid and root then
+                    local groundedNow = humanoid.FloorMaterial ~= Enum.Material.Air
+                    local stillNeedsManualRotation = Config.FlyEnabled
+                        or Config.SpinEnabled
+                        or (groundedNow and Config.StrafeEnabled)
+                        or ((not groundedNow) and Config.AirStrafeEnabled)
+
+                    if not stillNeedsManualRotation then
+                        humanoid.AutoRotate = MovementState.AutoRotateRestore
+                        MovementState.RotationApplied = false
+                        root.AssemblyAngularVelocity = Vector3.zero
+                    end
+                end
+            end
+        end,
         nil
     )
 
@@ -3269,43 +3315,16 @@ local function SetupMovementPage()
             MovementState.LastGroundedAt = os.clock()
         end
 
-        -- Coin Farm chains coins without braking between pickups.
-        -- When we enter pickup range, the current coin is ignored for a very short
-        -- handoff window and the next nearest coin is selected immediately.
-        -- If the current coin has not disappeared yet and no other coin exists,
-        -- flight keeps its previous direction instead of stopping on top of it.
+        -- Coin Farm uses target-lock instead of constantly changing its mind.
+        -- It chooses the nearest coin only when there is no valid current target,
+        -- then flies to that exact coin until Roblox removes/collects it. Only then
+        -- is the next nearest coin selected. Newly spawned closer coins do NOT steal
+        -- the target mid-flight, which removes zig-zagging and fake pickup attempts.
         if Config.CoinFarmEnabled then
             UpdateCoinFarmForcedStates()
 
-            local now = os.clock()
-            local currentTarget = MovementState.CoinTarget
-
-            if TargetStillValid(currentTarget) then
-                local targetDistance = (currentTarget.Position - root.Position).Magnitude
-
-                if targetDistance <= 3.0 then
-                    MovementState.CoinIgnoreUntil[currentTarget] = now + 0.22
-
-                    local nextTarget = FindNearestCoin(root)
-                    if nextTarget then
-                        MovementState.CoinTarget = nextTarget
-                    end
-
-                    MovementState.CoinNextRetarget = now + 0.015
-                elseif now >= MovementState.CoinNextRetarget then
-                    local nearest = FindNearestCoin(root)
-                    if nearest then
-                        MovementState.CoinTarget = nearest
-                    end
-                    MovementState.CoinNextRetarget = now + 0.02
-                end
-            else
+            if not TargetStillValid(MovementState.CoinTarget) then
                 MovementState.CoinTarget = FindNearestCoin(root)
-                MovementState.CoinNextRetarget = now + 0.02
-
-                if not MovementState.CoinTarget then
-                    MovementState.CoinLastDirection = Vector3.zero
-                end
             end
         else
             MovementState.CoinTarget = nil
@@ -3415,22 +3434,20 @@ local function SetupMovementPage()
                     local target = MovementState.CoinTarget
 
                     if TargetStillValid(target) then
-                        local ignoreUntil = MovementState.CoinIgnoreUntil[target]
+                        local offset = target.Position - root.Position
 
-                        if ignoreUntil and ignoreUntil > os.clock() and MovementState.CoinLastDirection.Magnitude > 0.001 then
-                            -- Continue straight through the coin while Roblox removes it.
-                            -- This prevents the tiny stop that used to happen after every pickup.
-                            dir = MovementState.CoinLastDirection
+                        if offset.Magnitude > 0.05 then
+                            dir = offset.Unit
+                            MovementState.CoinLastDirection = dir
                             facing = CFrame.lookAt(root.Position, root.Position + dir)
                             speed = Config.CoinFarmSpeed
                         else
-                            local offset = target.Position - root.Position
-                            if offset.Magnitude > 0.001 then
-                                dir = offset.Unit
-                                MovementState.CoinLastDirection = dir
-                                facing = CFrame.lookAt(root.Position, root.Position + dir)
-                                speed = Config.CoinFarmSpeed
-                            end
+                            -- We reached the selected coin. Hold position on it until the
+                            -- game confirms collection by removing it; do not chase another
+                            -- coin early and do not oscillate between nearby coins.
+                            dir = Vector3.zero
+                            facing = root.CFrame
+                            speed = 0
                         end
                     else
                         MovementState.CoinLastDirection = Vector3.zero
