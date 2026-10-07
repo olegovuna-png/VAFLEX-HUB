@@ -1370,111 +1370,86 @@ do
         LastSafeCFrame = nil,
         LastWarningAt = 0,
 
-        DesyncHeartbeat = nil,
+        DesyncStep = nil,
         DesyncRestore = nil,
         DesyncCharacter = nil,
         DesyncRoot = nil,
+        DesyncHumanoid = nil,
+
+        DesyncRealCFrame = nil,
         DesyncRealVelocity = nil,
         DesyncRealAngularVelocity = nil,
         DesyncRealHumanoidState = nil,
-        DesyncHumanoid = nil,
+
+        DesyncCamera = nil,
+        DesyncCameraRelative = nil,
+
         DesyncSpoofVelocity = Vector3.zero,
+        DesyncSpoofCFrame = nil,
         DesyncSpoofed = false,
     }
 
-    local antiFlingCard = New("Frame", {
-        Name = "AntiFlingCard",
+    local antiFlingRow = New("Frame", {
+        Name = "AntiFlingRow",
         Position = UDim2.fromOffset(0, 58),
-        Size = UDim2.new(1, 0, 0, 78),
+        Size = UDim2.new(1, 0, 0, 44),
         BackgroundColor3 = Config.Panel2,
         BackgroundTransparency = 0.05,
         BorderSizePixel = 0,
         ZIndex = 105,
     })
-    antiFlingCard.Parent = DefensePage
-    Corner(antiFlingCard, 13)
-    Stroke(antiFlingCard, Config.Border, 0.08, 1)
+    antiFlingRow.Parent = DefensePage
+    Corner(antiFlingRow, 11)
+    Stroke(antiFlingRow, Config.Border, 0.08, 1)
 
     local antiFlingTitle = New("TextLabel", {
-        Position = UDim2.fromOffset(14, 9),
-        Size = UDim2.new(1, -84, 0, 22),
+        Position = UDim2.fromOffset(13, 0),
+        Size = UDim2.new(1, -80, 1, 0),
         BackgroundTransparency = 1,
         Text = "Anti Fling",
         TextColor3 = Config.Text,
-        TextSize = 11,
+        TextSize = 10,
         Font = Enum.Font.GothamSemibold,
         TextXAlignment = Enum.TextXAlignment.Left,
         ZIndex = 106,
     })
-    antiFlingTitle.Parent = antiFlingCard
+    antiFlingTitle.Parent = antiFlingRow
 
-    local antiFlingDesc = New("TextLabel", {
-        Position = UDim2.fromOffset(14, 32),
-        Size = UDim2.new(1, -84, 0, 34),
-        BackgroundTransparency = 1,
-        Text = "Stops abnormal local velocity and returns you to the last stable position.",
-        TextColor3 = Config.Muted,
-        TextSize = 8,
-        Font = Enum.Font.Gotham,
-        TextWrapped = true,
-        TextXAlignment = Enum.TextXAlignment.Left,
-        TextYAlignment = Enum.TextYAlignment.Top,
-        ZIndex = 106,
-    })
-    antiFlingDesc.Parent = antiFlingCard
-
-    local antiAimCard = New("Frame", {
-        Name = "DesyncAntiAimCard",
-        Position = UDim2.fromOffset(0, 144),
-        Size = UDim2.new(1, 0, 0, 92),
+    local antiAimRow = New("Frame", {
+        Name = "AntiAimRow",
+        Position = UDim2.fromOffset(0, 110),
+        Size = UDim2.new(1, 0, 0, 44),
         BackgroundColor3 = Config.Panel2,
         BackgroundTransparency = 0.05,
         BorderSizePixel = 0,
         ZIndex = 105,
     })
-    antiAimCard.Parent = DefensePage
-    Corner(antiAimCard, 13)
-    Stroke(antiAimCard, Config.Border, 0.08, 1)
+    antiAimRow.Parent = DefensePage
+    Corner(antiAimRow, 11)
+    Stroke(antiAimRow, Config.Border, 0.08, 1)
 
     local antiAimTitle = New("TextLabel", {
-        Position = UDim2.fromOffset(14, 9),
-        Size = UDim2.new(1, -84, 0, 22),
+        Position = UDim2.fromOffset(13, 0),
+        Size = UDim2.new(1, -80, 1, 0),
         BackgroundTransparency = 1,
-        Text = "Desync Anti-Aim",
+        Text = "Anti Aim",
         TextColor3 = Config.Text,
-        TextSize = 11,
+        TextSize = 10,
         Font = Enum.Font.GothamSemibold,
         TextXAlignment = Enum.TextXAlignment.Left,
         ZIndex = 106,
     })
-    antiAimTitle.Parent = antiAimCard
-
-    local antiAimDesc = New("TextLabel", {
-        Position = UDim2.fromOffset(14, 32),
-        Size = UDim2.new(1, -84, 0, 48),
-        BackgroundTransparency = 1,
-        Text = "SYDJA predictor breaker. Keeps CFrame/camera unchanged while spoofing bounded XZ velocity and fresh airborne Y samples that its ping predictor accepts.",
-        TextColor3 = Config.Muted,
-        TextSize = 8,
-        Font = Enum.Font.Gotham,
-        TextWrapped = true,
-        TextXAlignment = Enum.TextXAlignment.Left,
-        TextYAlignment = Enum.TextYAlignment.Top,
-        ZIndex = 106,
-    })
-    antiAimDesc.Parent = antiAimCard
+    antiAimTitle.Parent = antiAimRow
 
     local status = New("TextLabel", {
-        Position = UDim2.fromOffset(4, 244),
-        Size = UDim2.new(1, -8, 0, 34),
+        Position = UDim2.fromOffset(4, 162),
+        Size = UDim2.new(1, -8, 0, 24),
         BackgroundTransparency = 1,
         Text = "Defense idle",
         TextColor3 = Config.Muted,
         TextSize = 8,
         Font = Enum.Font.Gotham,
-        TextWrapped = true,
         TextXAlignment = Enum.TextXAlignment.Left,
-        TextYAlignment = Enum.TextYAlignment.Top,
         ZIndex = 105,
     })
     status.Parent = DefensePage
@@ -1486,18 +1461,11 @@ do
             defenseState.Connection = nil
         end
         defenseState.LastSafeCFrame = nil
-        if UIControls.DefenseStatus and not Config.DesyncAntiAimEnabled then
-            UIControls.DefenseStatus.Text = "Anti Fling disabled"
-        end
     end
 
     local function startAntiFling()
         stopAntiFling()
         if not Config.AntiFlingEnabled then return end
-
-        if UIControls.DefenseStatus then
-            UIControls.DefenseStatus.Text = "Anti Fling enabled"
-        end
 
         defenseState.Connection = Connect(RunService.Heartbeat, function()
             if not Running or not Config.AntiFlingEnabled then return end
@@ -1510,9 +1478,7 @@ do
                 return
             end
 
-            -- The desync feature intentionally moves the root for a fraction of a frame.
-            -- Never let Anti Fling interpret that as an external fling.
-            if Config.DesyncAntiAimEnabled or Config.FlyEnabled or Config.CoinFarmEnabled or UIControls.FlingBusy then
+            if Config.DesyncAntiAimEnabled or Config.FlyEnabled or UIControls.FlingBusy then
                 defenseState.LastSafeCFrame = root.CFrame
                 return
             end
@@ -1527,12 +1493,10 @@ do
                 if defenseState.LastSafeCFrame then
                     root.CFrame = defenseState.LastSafeCFrame
                 end
-
-                local now = os.clock()
-                if now - defenseState.LastWarningAt > 0.8 then
-                    defenseState.LastWarningAt = now
+                if os.clock() - defenseState.LastWarningAt > 0.8 then
+                    defenseState.LastWarningAt = os.clock()
                     if UIControls.DefenseStatus then
-                        UIControls.DefenseStatus.Text = "Abnormal velocity blocked"
+                        UIControls.DefenseStatus.Text = "Fling blocked"
                     end
                 end
             elseif linear.Magnitude < 90 and angular.Magnitude < 35 then
@@ -1541,40 +1505,50 @@ do
         end)
     end
 
-    local function restoreDesyncVelocity()
+    local function restoreAntiAim()
+        if not defenseState.DesyncSpoofed then return end
+
         local root = defenseState.DesyncRoot
         local humanoid = defenseState.DesyncHumanoid
 
-        if defenseState.DesyncSpoofed then
-            if root and root.Parent then
-                pcall(function()
-                    if defenseState.DesyncRealVelocity then
-                        root.AssemblyLinearVelocity = defenseState.DesyncRealVelocity
-                        root.Velocity = defenseState.DesyncRealVelocity
-                    end
-                    if defenseState.DesyncRealAngularVelocity then
-                        root.AssemblyAngularVelocity = defenseState.DesyncRealAngularVelocity
-                        root.RotVelocity = defenseState.DesyncRealAngularVelocity
-                    end
-                end)
-            end
+        if root and root.Parent then
+            pcall(function()
+                if defenseState.DesyncRealCFrame then
+                    root.CFrame = defenseState.DesyncRealCFrame
+                end
+                if defenseState.DesyncRealVelocity then
+                    root.AssemblyLinearVelocity = defenseState.DesyncRealVelocity
+                    root.Velocity = defenseState.DesyncRealVelocity
+                end
+                if defenseState.DesyncRealAngularVelocity then
+                    root.AssemblyAngularVelocity = defenseState.DesyncRealAngularVelocity
+                    root.RotVelocity = defenseState.DesyncRealAngularVelocity
+                end
+            end)
+        end
 
-            if humanoid and humanoid.Parent and defenseState.DesyncRealHumanoidState then
-                pcall(function()
-                    humanoid:ChangeState(defenseState.DesyncRealHumanoidState)
-                end)
-            end
+        if humanoid and humanoid.Parent and defenseState.DesyncRealHumanoidState then
+            pcall(function()
+                humanoid:ChangeState(defenseState.DesyncRealHumanoidState)
+            end)
+        end
+
+        local camera = defenseState.DesyncCamera
+        if camera and camera.Parent and defenseState.DesyncRealCFrame and defenseState.DesyncCameraRelative then
+            pcall(function()
+                camera.CFrame = defenseState.DesyncRealCFrame * defenseState.DesyncCameraRelative
+            end)
         end
 
         defenseState.DesyncSpoofed = false
     end
 
-    local function stopExecutorDesync()
-        restoreDesyncVelocity()
+    local function stopAntiAim()
+        restoreAntiAim()
 
-        if defenseState.DesyncHeartbeat then
-            defenseState.DesyncHeartbeat:Disconnect()
-            defenseState.DesyncHeartbeat = nil
+        if defenseState.DesyncStep then
+            defenseState.DesyncStep:Disconnect()
+            defenseState.DesyncStep = nil
         end
         if defenseState.DesyncRestore then
             defenseState.DesyncRestore:Disconnect()
@@ -1583,153 +1557,168 @@ do
 
         defenseState.DesyncCharacter = nil
         defenseState.DesyncRoot = nil
+        defenseState.DesyncHumanoid = nil
+        defenseState.DesyncRealCFrame = nil
         defenseState.DesyncRealVelocity = nil
         defenseState.DesyncRealAngularVelocity = nil
         defenseState.DesyncRealHumanoidState = nil
-        defenseState.DesyncHumanoid = nil
+        defenseState.DesyncCamera = nil
+        defenseState.DesyncCameraRelative = nil
         defenseState.DesyncSpoofVelocity = Vector3.zero
+        defenseState.DesyncSpoofCFrame = nil
         defenseState.DesyncSpoofed = false
 
         UIControls.DesyncSpoofVelocity = Vector3.zero
+        UIControls.DesyncSpoofCFrame = nil
     end
 
-    local function buildSpoofVelocity(root)
-        local now = os.clock()
+    local function phaseData(now)
+        local phase = math.floor(now / 0.031) % 8
 
-        -- Uploaded SYDJA predictor behavior:
-        --   * horizontal velocity > 90 is rejected and falls back toward direct aim;
-        --   * horizontal lead is capped to roughly 0.85 studs;
-        --   * vertical velocity is accepted while |Y| <= 90;
-        --   * a fresh Jumping sample can create up to ~6 studs of vertical lead.
-        --
-        -- Therefore huge 1000+ stud/s spoofing is counterproductive against it.
-        -- Stay inside its accepted range and make the accepted samples wrong.
+        local vectors = {
+            Vector3.new(82, 84, 12),
+            Vector3.new(-76, 58, 28),
+            Vector3.new(34, 82, -78),
+            Vector3.new(-42, 56, -74),
+            Vector3.new(70, 86, -36),
+            Vector3.new(-84, 60, -8),
+            Vector3.new(18, 80, 84),
+            Vector3.new(-22, 54, -82),
+        }
 
-        local phase = math.floor(now / 0.043) % 4
+        local offsets = {
+            Vector3.new(0.62, 0, 0.18),
+            Vector3.new(-0.58, 0, 0.28),
+            Vector3.new(0.24, 0, -0.64),
+            Vector3.new(-0.38, 0, -0.57),
+            Vector3.new(0.60, 0, -0.30),
+            Vector3.new(-0.66, 0, -0.06),
+            Vector3.new(0.16, 0, 0.64),
+            Vector3.new(-0.22, 0, -0.63),
+        }
 
-        -- Keep horizontal magnitude below SYDJA's 90 stud/s rejection threshold.
-        -- The direction changes frequently, which repeatedly trips its "fresh turn"
-        -- branch before measured displacement can fully settle the predictor.
-        local horizontal
-        if phase == 0 then
-            horizontal = Vector3.new(72, 0, 28)
-        elseif phase == 1 then
-            horizontal = Vector3.new(-68, 0, 34)
-        elseif phase == 2 then
-            horizontal = Vector3.new(30, 0, -74)
-        else
-            horizontal = Vector3.new(-36, 0, -70)
-        end
-
-        -- Keep Y positive so its falling-floor clamp never helps it.
-        -- Change by >12 stud/s between phases so observeVertical() keeps refreshing
-        -- yFreshUntil instead of dropping prediction after a few milliseconds.
-        local y
-        if phase == 0 then
-            y = 84
-        elseif phase == 1 then
-            y = 58
-        elseif phase == 2 then
-            y = 82
-        else
-            y = 56
-        end
-
-        return Vector3.new(horizontal.X, y, horizontal.Z)
+        return vectors[phase + 1], offsets[phase + 1]
     end
 
-    local function startExecutorDesync()
-        stopExecutorDesync()
+    local function startAntiAim()
+        stopAntiAim()
         if not Config.DesyncAntiAimEnabled then return end
 
-        -- Position/CFrame is never modified here. That keeps the camera attached
-        -- to the real character and avoids the old "camera follows hitbox off-map"
-        -- problem.
-        defenseState.DesyncHeartbeat = RunService.Heartbeat:Connect(function()
+        local stepSignal = RunService.PostSimulation or RunService.Heartbeat
+        defenseState.DesyncStep = stepSignal:Connect(function()
             if not Running or not Config.DesyncAntiAimEnabled then return end
 
             local character = LocalPlayer.Character
             local humanoid = character and character:FindFirstChildOfClass("Humanoid")
             local root = character and character:FindFirstChild("HumanoidRootPart")
-
             if not humanoid or humanoid.Health <= 0 or not root or root.Anchored then
                 return
             end
 
             if defenseState.DesyncSpoofed then
-                restoreDesyncVelocity()
+                restoreAntiAim()
             end
+
+            local realCFrame = root.CFrame
+            local realVelocity = root.AssemblyLinearVelocity
+            local realAngular = root.AssemblyAngularVelocity
 
             defenseState.DesyncCharacter = character
             defenseState.DesyncRoot = root
             defenseState.DesyncHumanoid = humanoid
-            defenseState.DesyncRealVelocity = root.AssemblyLinearVelocity
-            defenseState.DesyncRealAngularVelocity = root.AssemblyAngularVelocity
+            defenseState.DesyncRealCFrame = realCFrame
+            defenseState.DesyncRealVelocity = realVelocity
+            defenseState.DesyncRealAngularVelocity = realAngular
 
-            local okState, originalState = pcall(function()
+            local okState, stateNow = pcall(function()
                 return humanoid:GetState()
             end)
-            defenseState.DesyncRealHumanoidState = okState and originalState or nil
+            defenseState.DesyncRealHumanoidState = okState and stateNow or nil
 
-            local spoofVelocity = buildSpoofVelocity(root)
+            local camera = Workspace.CurrentCamera
+            defenseState.DesyncCamera = camera
+            defenseState.DesyncCameraRelative = nil
+            if camera then
+                pcall(function()
+                    defenseState.DesyncCameraRelative = realCFrame:ToObjectSpace(camera.CFrame)
+                end)
+            end
+
+            local spoofVelocity, baseOffset = phaseData(os.clock())
+
+            -- When standing still, position samples are the strongest fallback in
+            -- SYDJA. Add a small packet-sized XZ displacement so its measured
+            -- trajectory also changes. While already moving, keep the displacement
+            -- smaller so normal control remains usable.
+            local horizontalReal = Vector3.new(realVelocity.X, 0, realVelocity.Z).Magnitude
+            local scale = horizontalReal < 2 and 1.00 or (horizontalReal < 12 and 0.62 or 0.35)
+            local offset = baseOffset * scale
+
+            local p = realCFrame.Position
+            local rotation = realCFrame - p
+            local spoofCFrame = CFrame.new(p + offset) * rotation
+
             defenseState.DesyncSpoofVelocity = spoofVelocity
+            defenseState.DesyncSpoofCFrame = spoofCFrame
             UIControls.DesyncSpoofVelocity = spoofVelocity
+            UIControls.DesyncSpoofCFrame = spoofCFrame
 
             pcall(function()
-                -- CFrame is deliberately untouched: camera and visible body stay put.
+                -- Small CFrame displacement + accepted (<90 XZ) velocity gives the
+                -- predictor both a fake reported velocity and fake measured motion.
+                root.CFrame = spoofCFrame
                 root.AssemblyLinearVelocity = spoofVelocity
                 root.Velocity = spoofVelocity
                 root.AssemblyAngularVelocity = Vector3.zero
                 root.RotVelocity = Vector3.zero
 
-                -- SYDJA only applies its strong vertical branch while it believes
-                -- the target is Jumping/Freefall. This pulse is restored before
-                -- the next rendered frame / next physics step.
+                -- Fresh Jumping state + accepted vertical velocity attacks the
+                -- predictor's strongest vertical branch.
                 humanoid:ChangeState(Enum.HumanoidStateType.Jumping)
 
                 defenseState.DesyncSpoofed = true
             end)
         end)
 
-        -- Restore before the next rendered frame. Since CFrame never changes,
-        -- the camera remains on the visible body.
         local restoreSignal = RunService.PreRender or RunService.RenderStepped
         defenseState.DesyncRestore = restoreSignal:Connect(function()
             if not Running or not Config.DesyncAntiAimEnabled then
-                restoreDesyncVelocity()
+                restoreAntiAim()
                 return
             end
 
             if defenseState.DesyncCharacter ~= LocalPlayer.Character then
-                restoreDesyncVelocity()
+                restoreAntiAim()
                 defenseState.DesyncCharacter = nil
                 defenseState.DesyncRoot = nil
                 return
             end
 
-            restoreDesyncVelocity()
+            restoreAntiAim()
         end)
 
         if UIControls.DefenseStatus then
-            UIControls.DefenseStatus.Text = "SYDJA predictor breaker enabled • CFrame unchanged"
+            UIControls.DefenseStatus.Text = "Anti Aim enabled"
         end
     end
 
-    local function setDesyncAntiAim(value)
+    local function setAntiAim(value)
         value = value and true or false
         Config.DesyncAntiAimEnabled = value
 
         if value then
-            startExecutorDesync()
+            startAntiAim()
         else
-            stopExecutorDesync()
+            stopAntiAim()
         end
 
         if UIControls.DefenseStatus then
             if value then
-                UIControls.DefenseStatus.Text = "SYDJA predictor breaker enabled • CFrame unchanged"
+                UIControls.DefenseStatus.Text = "Anti Aim enabled"
+            elseif Config.AntiFlingEnabled then
+                UIControls.DefenseStatus.Text = "Anti Fling enabled"
             else
-                UIControls.DefenseStatus.Text = Config.AntiFlingEnabled and "Anti Fling enabled" or "Desync Anti-Aim disabled"
+                UIControls.DefenseStatus.Text = "Defense idle"
             end
         end
 
@@ -1737,21 +1726,29 @@ do
     end
 
     UIControls.AntiFlingSwitch = CreateSwitch(
-        antiFlingCard,
-        UDim2.new(1, -14, 0, 21),
+        antiFlingRow,
+        UDim2.new(1, -9, 0.5, 0),
         Config.AntiFlingEnabled,
         function(value)
             Config.AntiFlingEnabled = value
-            if value then startAntiFling() else stopAntiFling() end
+            if value then
+                startAntiFling()
+                if UIControls.DefenseStatus then UIControls.DefenseStatus.Text = "Anti Fling enabled" end
+            else
+                stopAntiFling()
+                if UIControls.DefenseStatus then
+                    UIControls.DefenseStatus.Text = Config.DesyncAntiAimEnabled and "Anti Aim enabled" or "Defense idle"
+                end
+            end
         end
     )
 
     UIControls.DesyncAntiAimSwitch = CreateSwitch(
-        antiAimCard,
-        UDim2.new(1, -14, 0, 21),
+        antiAimRow,
+        UDim2.new(1, -9, 0.5, 0),
         Config.DesyncAntiAimEnabled,
         function(value)
-            setDesyncAntiAim(value)
+            setAntiAim(value)
         end
     )
 
@@ -1769,22 +1766,23 @@ do
         if UIControls.DesyncAntiAimSwitch then
             UIControls.DesyncAntiAimSwitch:SetInstant(value, false)
         end
-        return setDesyncAntiAim(value)
+        return setAntiAim(value)
     end
 
     Connect(LocalPlayer.CharacterAdded, function()
         if not Config.DesyncAntiAimEnabled then return end
-        task.delay(0.5, function()
+        task.delay(0.45, function()
             if Running and Config.DesyncAntiAimEnabled then
-                startExecutorDesync()
+                startAntiAim()
             end
         end)
     end)
 
     Connect(LocalPlayer.CharacterRemoving, function()
-        restoreDesyncVelocity()
+        restoreAntiAim()
         defenseState.DesyncCharacter = nil
         defenseState.DesyncRoot = nil
+        defenseState.DesyncHumanoid = nil
     end)
 end
 
@@ -2538,7 +2536,7 @@ UIControls.SetupMyESPSection = function()
         Position = UDim2.fromOffset(13, 0),
         Size = UDim2.new(1, -80, 1, 0),
         BackgroundTransparency = 1,
-        Text = "Show My Hitbox",
+        Text = "Show Ping Hitbox",
         TextColor3 = Config.Text,
         TextSize = 10,
         Font = Enum.Font.GothamSemibold,
@@ -2560,7 +2558,7 @@ UIControls.SetupMyESPSection = function()
         Position = UDim2.fromOffset(10, 103),
         Size = UDim2.new(1, -20, 0, 34),
         BackgroundTransparency = 1,
-        Text = "Local: unavailable\nServer estimate: unavailable",
+        Text = "Ping estimate: unavailable",
         TextColor3 = Config.Muted,
         TextSize = 7,
         Font = Enum.Font.Gotham,
@@ -2578,6 +2576,25 @@ UIControls.SetupMyESPSection = function()
         table.clear(UIControls.MyHitboxHistory)
     end
 
+    local function bodyPartAllowed(part, character)
+        if not part:IsA("BasePart") then return false end
+        if not part:IsDescendantOf(character) then return false end
+        if part:FindFirstAncestorOfClass("Tool") then return false end
+        if part:FindFirstAncestorOfClass("Accessory") then return false end
+        return true
+    end
+
+    local function getBodyParts(character)
+        local list = {}
+        if not character then return list end
+        for _, object in ipairs(character:GetDescendants()) do
+            if bodyPartAllowed(object, character) then
+                table.insert(list, object)
+            end
+        end
+        return list
+    end
+
     local function pushHistory(root)
         local history = UIControls.MyHitboxHistory
         local now = os.clock()
@@ -2585,11 +2602,8 @@ UIControls.SetupMyESPSection = function()
         history[#history + 1] = {
             Time = now,
             CFrame = root.CFrame,
-            Velocity = root.AssemblyLinearVelocity,
         }
 
-        -- Keep roughly the last 1.5 seconds. This is enough for normal latency
-        -- and also follows turns/jumps better than Position - Velocity * ping.
         local cutoff = now - 1.5
         while #history > 2 and history[1].Time < cutoff do
             table.remove(history, 1)
@@ -2606,13 +2620,8 @@ UIControls.SetupMyESPSection = function()
         return 0
     end
 
-    local function getNetworkEstimate(root)
+    local function getPingEstimate(root)
         local ping = getPingSeconds()
-
-        -- GetNetworkPing is latency information available to the client, not a
-        -- direct read of the server's authoritative character state. Use half
-        -- the measured delay as a one-way estimate and sample our actual CFrame
-        -- history at that time instead of extrapolating only from velocity.
         local oneWay = math.clamp(ping * 0.5, 0, 0.45)
         local targetTime = os.clock() - oneWay
         local history = UIControls.MyHitboxHistory
@@ -2646,117 +2655,162 @@ UIControls.SetupMyESPSection = function()
         return before.CFrame:Lerp(after.CFrame, alpha), ping
     end
 
-    local function destroyMarker(prefix)
-        local markerKey = prefix .. "Marker"
-        local highlightKey = prefix .. "Highlight"
-        local billboardKey = prefix .. "Billboard"
-        local textKey = prefix .. "Text"
-
-        if UIControls[markerKey] then
-            pcall(function() UIControls[markerKey]:Destroy() end)
+    local function destroyGhost(key)
+        local ghost = UIControls[key]
+        if ghost then
+            pcall(function() ghost.Model:Destroy() end)
         end
-
-        UIControls[markerKey] = nil
-        UIControls[highlightKey] = nil
-        UIControls[billboardKey] = nil
-        UIControls[textKey] = nil
+        UIControls[key] = nil
     end
 
-    local function ensureMarker(prefix, color, title)
-        local markerKey = prefix .. "Marker"
-        local highlightKey = prefix .. "Highlight"
-        local billboardKey = prefix .. "Billboard"
-        local textKey = prefix .. "Text"
+    local function createGhost(key, character, color, labelText)
+        destroyGhost(key)
 
-        local marker = UIControls[markerKey]
-        if marker and marker.Parent then
-            return marker
+        local model = New("Model", {
+            Name = "VAFLEX_" .. key,
+        })
+        model.Parent = workspace
+
+        local map = {}
+        local parts = getBodyParts(character)
+
+        for _, sourcePart in ipairs(parts) do
+            local ghostPart = New("Part", {
+                Name = sourcePart.Name,
+                Anchored = true,
+                CanCollide = false,
+                CanTouch = false,
+                CanQuery = false,
+                CastShadow = false,
+                Material = Enum.Material.Neon,
+                Color = color,
+                Transparency = 0.82,
+                Size = sourcePart.Size,
+            })
+            ghostPart.Parent = model
+            map[sourcePart] = ghostPart
         end
 
-        destroyMarker(prefix)
-
-        marker = New("Part", {
-            Name = "VAFLEX_" .. prefix,
-            Anchored = true,
-            CanCollide = false,
-            CanTouch = false,
-            CanQuery = false,
-            CastShadow = false,
-            Material = Enum.Material.Neon,
-            Color = color,
-            Transparency = 0.78,
-            Size = Vector3.new(2, 2, 1),
-        })
-        marker.Parent = workspace
-        UIControls[markerKey] = marker
-
         local highlight = New("Highlight", {
-            Name = "VAFLEX_" .. prefix .. "_HIGHLIGHT",
-            Adornee = marker,
+            Name = "Outline",
+            Adornee = model,
             DepthMode = Enum.HighlightDepthMode.AlwaysOnTop,
             FillColor = color,
             OutlineColor = color,
-            FillTransparency = 0.76,
+            FillTransparency = 0.82,
             OutlineTransparency = 0,
             Enabled = true,
         })
-        highlight.Parent = marker
-        UIControls[highlightKey] = highlight
+        highlight.Parent = model
 
-        local billboard = New("BillboardGui", {
-            Name = "VAFLEX_" .. prefix .. "_LABEL",
-            Adornee = marker,
-            Size = UDim2.fromOffset(165, 34),
-            StudsOffset = Vector3.new(0, 2.2, 0),
-            AlwaysOnTop = true,
-            LightInfluence = 0,
-        })
-        billboard.Parent = marker
-        UIControls[billboardKey] = billboard
+        local labelPart = map[character:FindFirstChild("Head")]
+            or map[character:FindFirstChild("HumanoidRootPart")]
+            or next(map)
 
-        local label = New("TextLabel", {
-            Size = UDim2.fromScale(1, 1),
-            BackgroundTransparency = 1,
-            Text = title,
-            TextColor3 = color,
-            TextSize = 9,
-            Font = Enum.Font.GothamBold,
-            TextStrokeColor3 = Color3.fromRGB(5, 8, 12),
-            TextStrokeTransparency = 0.15,
-            TextWrapped = true,
-        })
-        label.Parent = billboard
-        UIControls[textKey] = label
+        local billboard
+        local label
+        if labelPart then
+            billboard = New("BillboardGui", {
+                Name = "Label",
+                Adornee = labelPart,
+                Size = UDim2.fromOffset(170, 34),
+                StudsOffset = Vector3.new(0, 2.0, 0),
+                AlwaysOnTop = true,
+                LightInfluence = 0,
+            })
+            billboard.Parent = model
 
-        return marker
+            label = New("TextLabel", {
+                Size = UDim2.fromScale(1, 1),
+                BackgroundTransparency = 1,
+                Text = labelText,
+                TextColor3 = color,
+                TextSize = 9,
+                Font = Enum.Font.GothamBold,
+                TextStrokeColor3 = Color3.fromRGB(5, 8, 12),
+                TextStrokeTransparency = 0.15,
+            })
+            label.Parent = billboard
+        end
+
+        local ghost = {
+            Model = model,
+            Map = map,
+            Highlight = highlight,
+            Billboard = billboard,
+            Label = label,
+            Character = character,
+            Count = #parts,
+        }
+
+        UIControls[key] = ghost
+        return ghost
     end
 
-    local function setMarkerVisible(prefix, value)
-        local marker = UIControls[prefix .. "Marker"]
-        local highlight = UIControls[prefix .. "Highlight"]
-        local billboard = UIControls[prefix .. "Billboard"]
+    local function ensureGhost(key, character, color, labelText)
+        local ghost = UIControls[key]
+        local parts = getBodyParts(character)
 
-        if marker then marker.Transparency = value and 0.78 or 1 end
-        if highlight then highlight.Enabled = value end
-        if billboard then billboard.Enabled = value end
+        if not ghost or not ghost.Model or not ghost.Model.Parent
+            or ghost.Character ~= character or ghost.Count ~= #parts then
+            ghost = createGhost(key, character, color, labelText)
+        end
+
+        return ghost
+    end
+
+    local function setGhostVisible(key, visible)
+        local ghost = UIControls[key]
+        if not ghost then return end
+
+        if ghost.Highlight then
+            ghost.Highlight.Enabled = visible
+        end
+        if ghost.Billboard then
+            ghost.Billboard.Enabled = visible
+        end
+
+        for _, part in pairs(ghost.Map) do
+            if part and part.Parent then
+                part.Transparency = visible and 0.82 or 1
+            end
+        end
+    end
+
+    local function updateGhost(ghost, character, root, targetRootCFrame, labelText)
+        if not ghost or not root then return end
+
+        local rootDelta = targetRootCFrame * root.CFrame:Inverse()
+
+        for sourcePart, ghostPart in pairs(ghost.Map) do
+            if sourcePart and sourcePart.Parent and ghostPart and ghostPart.Parent then
+                ghostPart.Size = sourcePart.Size
+                ghostPart.CFrame = rootDelta * sourcePart.CFrame
+            end
+        end
+
+        if ghost.Label then
+            ghost.Label.Text = labelText
+        end
     end
 
     UIControls.DestroyMyHitboxESP = function()
-        destroyMarker("MyLocalHitbox")
-        destroyMarker("MyServerHitbox")
+        destroyGhost("MyPingGhost")
         clearHistory()
 
         if UIControls.MyHitboxPositionLabel then
-            UIControls.MyHitboxPositionLabel.Text = "Local: unavailable\nServer estimate: unavailable"
+            UIControls.MyHitboxPositionLabel.Text = "Ping estimate: unavailable"
         end
     end
 
     Connect(LocalPlayer.CharacterAdded, function()
         clearHistory()
+        destroyGhost("MyPingGhost")
     end)
 
     Connect(LocalPlayer.CharacterRemoving, function()
         clearHistory()
+        destroyGhost("MyPingGhost")
     end)
 
     Connect(RunService.Heartbeat, function()
@@ -2766,12 +2820,11 @@ UIControls.SetupMyESPSection = function()
         local humanoid = character and character:FindFirstChildOfClass("Humanoid")
         local root = character and character:FindFirstChild("HumanoidRootPart")
 
-        if not root or not humanoid or humanoid.Health <= 0 then
-            setMarkerVisible("MyLocalHitbox", false)
-            setMarkerVisible("MyServerHitbox", false)
+        if not character or not root or not humanoid or humanoid.Health <= 0 then
+            setGhostVisible("MyPingGhost", false)
 
             if UIControls.MyHitboxPositionLabel then
-                UIControls.MyHitboxPositionLabel.Text = "Local: unavailable\nServer estimate: unavailable"
+                UIControls.MyHitboxPositionLabel.Text = "Ping estimate: unavailable"
             end
             return
         end
@@ -2779,62 +2832,41 @@ UIControls.SetupMyESPSection = function()
         pushHistory(root)
 
         local localCFrame = root.CFrame
-        local serverCFrame, ping = getNetworkEstimate(root)
-        local localPos = localCFrame.Position
-        local serverPos = serverCFrame.Position
+        local pingCFrame, ping = getPingEstimate(root)
+        local pingPos = pingCFrame.Position
 
-        UIControls.MyEstimatedServerCFrame = serverCFrame
-        UIControls.MyEstimatedServerPosition = serverPos
+        UIControls.MyEstimatedServerCFrame = pingCFrame
+        UIControls.MyEstimatedServerPosition = pingPos
 
         if UIControls.MyHitboxPositionLabel then
-            local spoof = UIControls.DesyncSpoofVelocity or Vector3.zero
             UIControls.MyHitboxPositionLabel.Text = string.format(
-                "Local: %.1f, %.1f, %.1f\nServer est: %.1f, %.1f, %.1f • %.0f ms | Spoof Y: %.0f",
-                localPos.X, localPos.Y, localPos.Z,
-                serverPos.X, serverPos.Y, serverPos.Z,
-                ping * 1000,
-                spoof.Y
+                "Ping est: %.1f, %.1f, %.1f • %.0f ms",
+                pingPos.X, pingPos.Y, pingPos.Z,
+                ping * 1000
             )
         end
 
         if not Config.ShowMyHitbox then
-            setMarkerVisible("MyLocalHitbox", false)
-            setMarkerVisible("MyServerHitbox", false)
+            setGhostVisible("MyPingGhost", false)
             return
         end
 
-        local localMarker = ensureMarker(
-            "MyLocalHitbox",
-            Config.WaterBright,
-            "LOCAL HITBOX"
-        )
-        local serverMarker = ensureMarker(
-            "MyServerHitbox",
+        local pingGhost = ensureGhost(
+            "MyPingGhost",
+            character,
             Color3.fromRGB(255, 215, 80),
-            "SERVER HITBOX EST."
+            "PING HITBOX"
         )
 
-        localMarker.CFrame = localCFrame
-        localMarker.Size = root.Size
+        updateGhost(
+            pingGhost,
+            character,
+            root,
+            pingCFrame,
+            string.format("PING HITBOX • %.0f ms", ping * 1000)
+        )
 
-        serverMarker.CFrame = serverCFrame
-        serverMarker.Size = root.Size
-
-        setMarkerVisible("MyLocalHitbox", true)
-        setMarkerVisible("MyServerHitbox", true)
-
-        local localText = UIControls.MyLocalHitboxText
-        if localText then
-            localText.Text = "LOCAL HITBOX"
-        end
-
-        local serverText = UIControls.MyServerHitboxText
-        if serverText then
-            serverText.Text = string.format(
-                "SERVER EST. • %.0f ms",
-                ping * 1000
-            )
-        end
+        setGhostVisible("MyPingGhost", true)
     end)
 end
 
@@ -5735,7 +5767,7 @@ do
         if Config.NoclipEnabled then table.insert(names, "Noclip") end
         if Config.CoinFarmEnabled then table.insert(names, "Coin Farm  " .. tostring(Config.CoinFarmSpeed)) end
         if Config.AntiFlingEnabled then table.insert(names, "Anti Fling") end
-        if Config.DesyncAntiAimEnabled then table.insert(names, "SYDJA Breaker") end
+        if Config.DesyncAntiAimEnabled then table.insert(names, "Anti Aim") end
         return names
     end
 
