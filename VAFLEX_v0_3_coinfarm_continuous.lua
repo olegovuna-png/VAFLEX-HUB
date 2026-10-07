@@ -74,6 +74,7 @@ local Config = {
     NoclipEnabled = false,
     CoinFarmEnabled = false,
     CoinFarmSpeed = 22,
+    AntiFlingEnabled = false,
 
     -- Small on-screen list of currently enabled functions
     FunctionsHUDEnabled = false,
@@ -1030,7 +1031,7 @@ local Main = New("Frame", {
     Name = "Main",
     AnchorPoint = Vector2.new(0.5, 0.5),
     Position = UDim2.fromScale(0.5, 0.5),
-    Size = UDim2.fromOffset(430, 320),
+    Size = UDim2.fromOffset(430, 355),
     BackgroundColor3 = Config.Panel,
     BackgroundTransparency = 0.12,
     BorderSizePixel = 0,
@@ -1245,6 +1246,8 @@ CreateTab("Movement", "↗")
 Pages["Movement"].Page.Name = "MovementPage"
 CreateTab("Combat", "⚔")
 Pages["Combat"].Page.Name = "CombatPage"
+local DefensePage = CreateTab("Defense", "◇")
+DefensePage.Name = "DefensePage"
 local SettingsPage = CreateTab("Settings", "⚙")
 SettingsPage.Name = "SettingsPage"
 local ConfigsPage = CreateTab("Configs", "▣")
@@ -1280,6 +1283,7 @@ end
 CreatePageTitle(VisualPage, "Visual", "Visual modules")
 CreatePageTitle(Pages["Movement"].Page, "Movement", "Movement and air controls")
 CreatePageTitle(Pages["Combat"].Page, "Combat", "Role-based combat modules")
+CreatePageTitle(DefensePage, "Defense", "Protection and recovery modules")
 CreatePageTitle(SettingsPage, "Settings", "VAFLEX configuration")
 CreatePageTitle(ConfigsPage, "Configs", "Save and restore VAFLEX settings")
 
@@ -1350,6 +1354,153 @@ local function CreateSwitch(parent, position, default, callback)
             return enabled
         end,
     }
+end
+
+
+--// ============================================================
+--// DEFENSE PAGE
+--// ============================================================
+
+do
+    local defenseState = {
+        Connection = nil,
+        LastSafeCFrame = nil,
+        LastWarningAt = 0,
+    }
+
+    local card = New("Frame", {
+        Name = "AntiFlingCard",
+        Position = UDim2.fromOffset(0, 58),
+        Size = UDim2.new(1, 0, 0, 82),
+        BackgroundColor3 = Config.Panel2,
+        BackgroundTransparency = 0.05,
+        BorderSizePixel = 0,
+        ZIndex = 105,
+    })
+    card.Parent = DefensePage
+    Corner(card, 13)
+    Stroke(card, Config.Border, 0.08, 1)
+
+    local title = New("TextLabel", {
+        Position = UDim2.fromOffset(14, 10),
+        Size = UDim2.new(1, -84, 0, 22),
+        BackgroundTransparency = 1,
+        Text = "Anti Fling",
+        TextColor3 = Config.Text,
+        TextSize = 11,
+        Font = Enum.Font.GothamSemibold,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        ZIndex = 106,
+    })
+    title.Parent = card
+
+    local desc = New("TextLabel", {
+        Position = UDim2.fromOffset(14, 34),
+        Size = UDim2.new(1, -84, 0, 34),
+        BackgroundTransparency = 1,
+        Text = "Stops abnormal local velocity and returns you to the last stable position.",
+        TextColor3 = Config.Muted,
+        TextSize = 8,
+        Font = Enum.Font.Gotham,
+        TextWrapped = true,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        TextYAlignment = Enum.TextYAlignment.Top,
+        ZIndex = 106,
+    })
+    desc.Parent = card
+
+    local status = New("TextLabel", {
+        Position = UDim2.fromOffset(4, 148),
+        Size = UDim2.new(1, -8, 0, 22),
+        BackgroundTransparency = 1,
+        Text = "Defense idle",
+        TextColor3 = Config.Muted,
+        TextSize = 8,
+        Font = Enum.Font.Gotham,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        ZIndex = 105,
+    })
+    status.Parent = DefensePage
+    UIControls.DefenseStatus = status
+
+    local function stopAntiFling()
+        if defenseState.Connection then
+            defenseState.Connection:Disconnect()
+            defenseState.Connection = nil
+        end
+        defenseState.LastSafeCFrame = nil
+        if UIControls.DefenseStatus then
+            UIControls.DefenseStatus.Text = "Anti Fling disabled"
+        end
+    end
+
+    local function startAntiFling()
+        stopAntiFling()
+        if not Config.AntiFlingEnabled then return end
+
+        if UIControls.DefenseStatus then
+            UIControls.DefenseStatus.Text = "Anti Fling enabled"
+        end
+
+        defenseState.Connection = Connect(RunService.Heartbeat, function()
+            if not Running or not Config.AntiFlingEnabled then return end
+
+            local character = LocalPlayer.Character
+            local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+            local root = character and character:FindFirstChild("HumanoidRootPart")
+            if not humanoid or humanoid.Health <= 0 or not root then
+                defenseState.LastSafeCFrame = nil
+                return
+            end
+
+            -- Do not fight VAFLEX movement modules while the user intentionally moves fast.
+            if Config.FlyEnabled or Config.CoinFarmEnabled or UIControls.FlingBusy then
+                defenseState.LastSafeCFrame = root.CFrame
+                return
+            end
+
+            local linear = root.AssemblyLinearVelocity
+            local angular = root.AssemblyAngularVelocity
+            local abnormal = linear.Magnitude > 250 or angular.Magnitude > 250
+
+            if abnormal then
+                root.AssemblyLinearVelocity = Vector3.zero
+                root.AssemblyAngularVelocity = Vector3.zero
+                if defenseState.LastSafeCFrame then
+                    root.CFrame = defenseState.LastSafeCFrame
+                end
+
+                local now = os.clock()
+                if now - defenseState.LastWarningAt > 0.8 then
+                    defenseState.LastWarningAt = now
+                    if UIControls.DefenseStatus then
+                        UIControls.DefenseStatus.Text = "Abnormal velocity blocked"
+                    end
+                end
+            elseif linear.Magnitude < 90 and angular.Magnitude < 35 then
+                defenseState.LastSafeCFrame = root.CFrame
+            end
+        end)
+    end
+
+    UIControls.AntiFlingSwitch = CreateSwitch(
+        card,
+        UDim2.new(1, -14, 0, 22),
+        Config.AntiFlingEnabled,
+        function(value)
+            Config.AntiFlingEnabled = value
+            if value then startAntiFling() else stopAntiFling() end
+        end
+    )
+
+    UIControls.SetAntiFling = function(value)
+        value = value and true or false
+        Config.AntiFlingEnabled = value
+        if UIControls.AntiFlingSwitch then
+            UIControls.AntiFlingSwitch:Set(value, false)
+        end
+        if value then startAntiFling() else stopAntiFling() end
+    end
 end
 
 
@@ -4132,6 +4283,7 @@ do
         NoclipEnabled = false,
         CoinFarmEnabled = false,
         CoinFarmSpeed = 22,
+        AntiFlingEnabled = false,
         FunctionsHUDEnabled = false,
     }
 
@@ -4164,6 +4316,7 @@ do
             NoclipEnabled = Config.NoclipEnabled,
             CoinFarmEnabled = Config.CoinFarmEnabled,
             CoinFarmSpeed = Config.CoinFarmSpeed,
+            AntiFlingEnabled = Config.AntiFlingEnabled,
             FunctionsHUDEnabled = Config.FunctionsHUDEnabled,
         }
     end
@@ -4199,6 +4352,7 @@ do
         Config.NoclipEnabled = snapshot.NoclipEnabled == true
         Config.CoinFarmEnabled = snapshot.CoinFarmEnabled == true
         Config.CoinFarmSpeed = math.clamp(snapshot.CoinFarmSpeed or 22, 1, 100)
+        Config.AntiFlingEnabled = snapshot.AntiFlingEnabled == true
         Config.FunctionsHUDEnabled = snapshot.FunctionsHUDEnabled == true
 
         UIControls.RoleSwitch:SetInstant(Config.RoleESP, false)
@@ -4223,6 +4377,7 @@ do
         if UIControls.NoclipSwitch then UIControls.NoclipSwitch:SetInstant(Config.NoclipEnabled, false) end
         if UIControls.CoinFarmSwitch then UIControls.CoinFarmSwitch:SetInstant(Config.CoinFarmEnabled, false) end
         if UIControls.ApplyCoinFarmState then UIControls.ApplyCoinFarmState(Config.CoinFarmEnabled) end
+        if UIControls.SetAntiFling then UIControls.SetAntiFling(Config.AntiFlingEnabled) end
         if UIControls.FunctionsHUDSwitch then UIControls.FunctionsHUDSwitch:SetInstant(Config.FunctionsHUDEnabled, false) end
         if UIControls.SetWalkSpeedValue then UIControls.SetWalkSpeedValue(Config.WalkSpeedValue) end
         if UIControls.SetLongJumpSpeed then UIControls.SetLongJumpSpeed(Config.LongJumpSpeed) end
@@ -4777,6 +4932,7 @@ do
         if Config.SpinEnabled then table.insert(names, "Spin  " .. tostring(Config.SpinSpeed) .. "  ·  " .. tostring(Config.SpinMode)) end
         if Config.NoclipEnabled then table.insert(names, "Noclip") end
         if Config.CoinFarmEnabled then table.insert(names, "Coin Farm  " .. tostring(Config.CoinFarmSpeed)) end
+        if Config.AntiFlingEnabled then table.insert(names, "Anti Fling") end
         return names
     end
 
@@ -5598,11 +5754,213 @@ end
 
 
 --// ============================================================
---// COMBAT ROLE FLING
+--// COMBAT ROLE FLING - YARHM / SkidFling movement engine
 --// ============================================================
 
 UIControls.FlingBusy = false
 UIControls.FlingGeneration = 0
+
+local function FindLivingRoleTarget(roleName)
+    local bestPlayer = nil
+    local bestDistance = math.huge
+    local myCharacter = LocalPlayer.Character
+    local myRoot = myCharacter and myCharacter:FindFirstChild("HumanoidRootPart")
+
+    for _, candidate in ipairs(Players:GetPlayers()) do
+        if candidate ~= LocalPlayer then
+            local role = GetRole(candidate)
+            local matches = role == roleName or (roleName == "Sheriff" and role == "Hero")
+            if matches then
+                local character = candidate.Character
+                local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+                local root = character and character:FindFirstChild("HumanoidRootPart")
+                if humanoid and humanoid.Health > 0 and root and not root.Anchored then
+                    local distance = myRoot and (root.Position - myRoot.Position).Magnitude or 0
+                    if distance < bestDistance then
+                        bestDistance = distance
+                        bestPlayer = candidate
+                    end
+                end
+            end
+        end
+    end
+
+    return bestPlayer
+end
+
+local function RunYARHMFling(targetPlayer, generation, roleName)
+    local character = LocalPlayer.Character
+    local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+    local root = character and character:FindFirstChild("HumanoidRootPart")
+    local targetCharacter = targetPlayer and targetPlayer.Character
+    local targetHumanoid = targetCharacter and targetCharacter:FindFirstChildOfClass("Humanoid")
+    local targetRoot = targetHumanoid and targetHumanoid.RootPart
+        or (targetCharacter and targetCharacter:FindFirstChild("HumanoidRootPart"))
+    local targetHead = targetCharacter and targetCharacter:FindFirstChild("Head")
+    local accessory = targetCharacter and targetCharacter:FindFirstChildOfClass("Accessory")
+    local handle = accessory and accessory:FindFirstChild("Handle")
+
+    if not character or not humanoid or humanoid.Health <= 0 or not root
+        or not targetCharacter or not targetHumanoid or targetHumanoid.Health <= 0 then
+        return false, "Target is not ready"
+    end
+
+    local returnPivot = character:GetPivot()
+    local oldCameraSubject = Workspace.CurrentCamera and Workspace.CurrentCamera.CameraSubject or nil
+    local oldFallenHeight = Workspace.FallenPartsDestroyHeight
+    local oldSeatedEnabled = humanoid:GetStateEnabled(Enum.HumanoidStateType.Seated)
+    local bodyVelocity = nil
+
+    local function restore()
+        if bodyVelocity and bodyVelocity.Parent then
+            bodyVelocity:Destroy()
+        end
+
+        pcall(function()
+            humanoid:SetStateEnabled(Enum.HumanoidStateType.Seated, oldSeatedEnabled)
+        end)
+        pcall(function()
+            Workspace.FallenPartsDestroyHeight = oldFallenHeight
+        end)
+
+        if Workspace.CurrentCamera and humanoid.Parent then
+            Workspace.CurrentCamera.CameraSubject = humanoid
+        elseif Workspace.CurrentCamera and oldCameraSubject then
+            Workspace.CurrentCamera.CameraSubject = oldCameraSubject
+        end
+
+        if root and root.Parent and LocalPlayer.Character == character then
+            pcall(function()
+                root.AssemblyLinearVelocity = Vector3.zero
+                root.AssemblyAngularVelocity = Vector3.zero
+                character:PivotTo(returnPivot * CFrame.new(0, 0.5, 0))
+                humanoid:ChangeState(Enum.HumanoidStateType.GettingUp)
+            end)
+        end
+    end
+
+    local function stillValid()
+        if not Running or generation ~= UIControls.FlingGeneration then return false end
+        if LocalPlayer.Character ~= character or humanoid.Health <= 0 or not root.Parent then return false end
+        if targetPlayer.Parent ~= Players or targetPlayer.Character ~= targetCharacter then return false end
+        if not targetHumanoid.Parent or targetHumanoid.Health <= 0 then return false end
+        local role = GetRole(targetPlayer)
+        if roleName == "Sheriff" then
+            return role == "Sheriff" or role == "Hero"
+        end
+        return role == roleName
+    end
+
+    local function positionAgainst(basePart, offset, angle)
+        if not basePart or not basePart.Parent or not stillValid() then return end
+        local cf = CFrame.new(basePart.Position) * offset * angle
+        root.CFrame = cf
+        character:PivotTo(cf)
+        root.AssemblyLinearVelocity = Vector3.new(9e7, 9e8, 9e7)
+        root.AssemblyAngularVelocity = Vector3.new(9e8, 9e8, 9e8)
+    end
+
+    local function flingBasePart(basePart)
+        if not basePart then return end
+        local started = os.clock()
+        local angle = 0
+        local timeout = 2.0
+
+        repeat
+            if not stillValid() then break end
+
+            local velocityMagnitude = basePart.AssemblyLinearVelocity.Magnitude
+            if velocityMagnitude < 50 then
+                angle = angle + 100
+                local movement = targetHumanoid.MoveDirection * (velocityMagnitude / 1.25)
+
+                positionAgainst(basePart, CFrame.new(0, 1.5, 0) + movement, CFrame.Angles(math.rad(angle), 0, 0))
+                task.wait()
+                positionAgainst(basePart, CFrame.new(0, -1.5, 0) + movement, CFrame.Angles(math.rad(angle), 0, 0))
+                task.wait()
+                positionAgainst(basePart, CFrame.new(2.25, 1.5, -2.25) + movement, CFrame.Angles(math.rad(angle), 0, 0))
+                task.wait()
+                positionAgainst(basePart, CFrame.new(-2.25, -1.5, 2.25) + movement, CFrame.Angles(math.rad(angle), 0, 0))
+                task.wait()
+                positionAgainst(basePart, CFrame.new(0, 1.5, 0) + targetHumanoid.MoveDirection, CFrame.Angles(math.rad(angle), 0, 0))
+                task.wait()
+                positionAgainst(basePart, CFrame.new(0, -1.5, 0) + targetHumanoid.MoveDirection, CFrame.Angles(math.rad(angle), 0, 0))
+                task.wait()
+            else
+                local targetSpeed = targetRoot and targetRoot.AssemblyLinearVelocity.Magnitude or velocityMagnitude
+                local walkSpeed = targetHumanoid.WalkSpeed
+
+                positionAgainst(basePart, CFrame.new(0, 1.5, walkSpeed), CFrame.Angles(math.rad(90), 0, 0))
+                task.wait()
+                positionAgainst(basePart, CFrame.new(0, -1.5, -walkSpeed), CFrame.Angles(0, 0, 0))
+                task.wait()
+                positionAgainst(basePart, CFrame.new(0, 1.5, walkSpeed), CFrame.Angles(math.rad(90), 0, 0))
+                task.wait()
+                positionAgainst(basePart, CFrame.new(0, 1.5, targetSpeed / 1.25), CFrame.Angles(math.rad(90), 0, 0))
+                task.wait()
+                positionAgainst(basePart, CFrame.new(0, -1.5, -targetSpeed / 1.25), CFrame.Angles(0, 0, 0))
+                task.wait()
+                positionAgainst(basePart, CFrame.new(0, 1.5, targetSpeed / 1.25), CFrame.Angles(math.rad(90), 0, 0))
+                task.wait()
+                positionAgainst(basePart, CFrame.new(0, -1.5, 0), CFrame.Angles(math.rad(90), 0, 0))
+                task.wait()
+                positionAgainst(basePart, CFrame.new(0, -1.5, 0), CFrame.Angles(0, 0, 0))
+                task.wait()
+                positionAgainst(basePart, CFrame.new(0, -1.5, 0), CFrame.Angles(math.rad(-90), 0, 0))
+                task.wait()
+                positionAgainst(basePart, CFrame.new(0, -1.5, 0), CFrame.Angles(0, 0, 0))
+                task.wait()
+            end
+        until not stillValid()
+            or basePart.AssemblyLinearVelocity.Magnitude > 500
+            or basePart.Parent ~= targetCharacter
+            or targetHumanoid.Sit
+            or os.clock() > started + timeout
+    end
+
+    local ok, err = pcall(function()
+        if Workspace.CurrentCamera then
+            if targetHead then
+                Workspace.CurrentCamera.CameraSubject = targetHead
+            elseif handle then
+                Workspace.CurrentCamera.CameraSubject = handle
+            else
+                Workspace.CurrentCamera.CameraSubject = targetHumanoid
+            end
+        end
+
+        pcall(function()
+            Workspace.FallenPartsDestroyHeight = 0 / 0
+        end)
+
+        bodyVelocity = Instance.new("BodyVelocity")
+        bodyVelocity.Name = "VAFLEX_YARHM_FlingVelocity"
+        bodyVelocity.Velocity = Vector3.new(9e8, 9e8, 9e8)
+        bodyVelocity.MaxForce = Vector3.new(math.huge, math.huge, math.huge)
+        bodyVelocity.Parent = root
+
+        humanoid:SetStateEnabled(Enum.HumanoidStateType.Seated, false)
+
+        if targetRoot and targetHead then
+            if (targetRoot.Position - targetHead.Position).Magnitude > 5 then
+                flingBasePart(targetHead)
+            else
+                flingBasePart(targetRoot)
+            end
+        elseif targetRoot then
+            flingBasePart(targetRoot)
+        elseif targetHead then
+            flingBasePart(targetHead)
+        elseif handle then
+            flingBasePart(handle)
+        else
+            error("No usable target body part")
+        end
+    end)
+
+    restore()
+    return ok, err
+end
 
 UIControls.FlingRole = function(roleName)
     if UIControls.FlingBusy then
@@ -5625,33 +5983,7 @@ UIControls.FlingRole = function(roleName)
         return
     end
 
-    local target = nil
-    local targetDistance = math.huge
-    local myCharacter = LocalPlayer.Character
-    local myRoot = myCharacter and myCharacter:FindFirstChild("HumanoidRootPart")
-
-    local function matchesRequestedRole(player)
-        local role = GetRole(player)
-        if role == roleName then return true end
-        return roleName == "Sheriff" and role == "Hero"
-    end
-
-    for _, player in ipairs(Players:GetPlayers()) do
-        if player ~= LocalPlayer and matchesRequestedRole(player) then
-            local character = player.Character
-            local humanoid = character and character:FindFirstChildOfClass("Humanoid")
-            local root = character and character:FindFirstChild("HumanoidRootPart")
-
-            if humanoid and humanoid.Health > 0 and root and not root.Anchored then
-                local distance = myRoot and (root.Position - myRoot.Position).Magnitude or 0
-                if distance < targetDistance then
-                    targetDistance = distance
-                    target = player
-                end
-            end
-        end
-    end
-
+    local target = FindLivingRoleTarget(roleName)
     if not target then
         if UIControls.CombatStatus then
             UIControls.CombatStatus.Text = "No living " .. roleName .. " found"
@@ -5663,98 +5995,21 @@ UIControls.FlingRole = function(roleName)
     UIControls.FlingGeneration = UIControls.FlingGeneration + 1
     local generation = UIControls.FlingGeneration
 
+    if UIControls.CombatStatus then
+        UIControls.CombatStatus.Text = "Fling " .. roleName .. ": " .. target.DisplayName
+    end
+
     task.spawn(function()
-        local character = LocalPlayer.Character
-        local humanoid = character and character:FindFirstChildOfClass("Humanoid")
-        local root = character and character:FindFirstChild("HumanoidRootPart")
-        local targetCharacter = target.Character
-        local targetHumanoid = targetCharacter and targetCharacter:FindFirstChildOfClass("Humanoid")
-        local targetRoot = targetCharacter and targetCharacter:FindFirstChild("HumanoidRootPart")
-
-        if not character or not humanoid or humanoid.Health <= 0 or not root
-            or not targetCharacter or not targetHumanoid or targetHumanoid.Health <= 0
-            or not targetRoot or targetRoot.Anchored then
-            UIControls.FlingBusy = false
-            if UIControls.CombatStatus then UIControls.CombatStatus.Text = "Fling target is not ready" end
-            return
-        end
-
-        local returnPivot = character:GetPivot()
-        local oldAutoRotate = humanoid.AutoRotate
-        local oldPlatformStand = humanoid.PlatformStand
-        local oldLinearVelocity = root.AssemblyLinearVelocity
-        local oldAngularVelocity = root.AssemblyAngularVelocity
-
-        humanoid.AutoRotate = false
-        humanoid.PlatformStand = true
-
-        if UIControls.CombatStatus then
-            UIControls.CombatStatus.Text = "Fling " .. roleName .. ": " .. target.DisplayName
-        end
-
-        local started = os.clock()
-        local duration = 1.15
-
-        while Running
-            and generation == UIControls.FlingGeneration
-            and os.clock() - started < duration do
-
-            if LocalPlayer.Character ~= character
-                or humanoid.Health <= 0
-                or target.Character ~= targetCharacter
-                or targetHumanoid.Health <= 0
-                or not root.Parent
-                or not targetRoot.Parent
-                or targetRoot.Anchored
-                or not matchesRequestedRole(target) then
-                break
-            end
-
-            -- Keep our collision body inside the target instead of orbiting around it.
-            -- Alternating high local velocity + spin produces the contact impulse.
-            local phase = (os.clock() - started) * 58
-            local push = Vector3.new(math.cos(phase), 0.10, math.sin(phase)) * 115
-
-            pcall(function()
-                character:PivotTo(CFrame.new(targetRoot.Position) * CFrame.Angles(0, phase, 0))
-                root.AssemblyAngularVelocity = Vector3.new(0, 1750, 0)
-                root.AssemblyLinearVelocity = push
-            end)
-
-            RunService.PreSimulation:Wait()
-        end
-
-        if root and root.Parent and LocalPlayer.Character == character then
-            pcall(function()
-                root.AssemblyLinearVelocity = Vector3.zero
-                root.AssemblyAngularVelocity = Vector3.zero
-                character:PivotTo(returnPivot)
-            end)
-        end
-
-        if humanoid and humanoid.Parent and LocalPlayer.Character == character then
-            humanoid.AutoRotate = oldAutoRotate
-            humanoid.PlatformStand = oldPlatformStand
-        end
-
-        task.wait()
-
-        if root and root.Parent and LocalPlayer.Character == character then
-            root.AssemblyLinearVelocity = Vector3.new(
-                math.clamp(oldLinearVelocity.X, -35, 35),
-                math.clamp(oldLinearVelocity.Y, -35, 35),
-                math.clamp(oldLinearVelocity.Z, -35, 35)
-            )
-            root.AssemblyAngularVelocity = Vector3.new(
-                math.clamp(oldAngularVelocity.X, -8, 8),
-                math.clamp(oldAngularVelocity.Y, -8, 8),
-                math.clamp(oldAngularVelocity.Z, -8, 8)
-            )
-        end
-
+        local ok, err = RunYARHMFling(target, generation, roleName)
         if generation == UIControls.FlingGeneration then
             UIControls.FlingBusy = false
-            if UIControls.CombatStatus then UIControls.CombatStatus.Text = "Fling finished • returned" end
+            if UIControls.CombatStatus then
+                if ok then
+                    UIControls.CombatStatus.Text = "Fling finished • returned"
+                else
+                    UIControls.CombatStatus.Text = "Fling stopped: " .. tostring(err or "target unavailable")
+                end
+            end
         end
     end)
 end
