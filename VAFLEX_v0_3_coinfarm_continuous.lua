@@ -1031,7 +1031,7 @@ local Main = New("Frame", {
     Name = "Main",
     AnchorPoint = Vector2.new(0.5, 0.5),
     Position = UDim2.fromScale(0.5, 0.5),
-    Size = UDim2.fromOffset(430, 355),
+    Size = UDim2.fromOffset(430, 320),
     BackgroundColor3 = Config.Panel,
     BackgroundTransparency = 0.12,
     BorderSizePixel = 0,
@@ -1150,7 +1150,7 @@ local SidebarPadding = New("UIPadding", {
 SidebarPadding.Parent = Sidebar
 
 local SidebarList = New("UIListLayout", {
-    Padding = UDim.new(0, 5),
+    Padding = UDim.new(0, 3),
     SortOrder = Enum.SortOrder.LayoutOrder,
 })
 SidebarList.Parent = Sidebar
@@ -1182,7 +1182,7 @@ end
 local function CreateTab(name, icon)
     local Button = New("TextButton", {
         Name = name .. "Tab",
-        Size = UDim2.new(1, 0, 0, 40),
+        Size = UDim2.new(1, 0, 0, 35),
         BackgroundColor3 = Config.Panel2,
         BackgroundTransparency = 1,
         Text = "",
@@ -1194,7 +1194,7 @@ local function CreateTab(name, icon)
 
     local Icon = New("TextLabel", {
         Position = UDim2.fromOffset(8, 0),
-        Size = UDim2.fromOffset(23, 40),
+        Size = UDim2.fromOffset(23, 35),
         BackgroundTransparency = 1,
         Text = icon,
         TextColor3 = Config.Muted,
@@ -1560,7 +1560,7 @@ UIControls.SetupCombatPage = function()
 
     UIControls.CombatSubPages = {}
     UIControls.CombatSubButtons = {}
-    UIControls.CombatSelected = "Innocent"
+    UIControls.CombatSelected = "Universal"
 
     local function createSubPage(name)
         local frame = New("Frame", {
@@ -1598,11 +1598,11 @@ UIControls.SetupCombatPage = function()
 
     local murderPage = createSubPage("Murder")
     local sheriffPage = createSubPage("Sheriff")
-    local innocentPage = createSubPage("Innocent")
+    local universalPage = createSubPage("Universal")
 
     createTabButton("Murder", 0)
     createTabButton("Sheriff", 1/3)
-    createTabButton("Innocent", 2/3)
+    createTabButton("Universal", 2/3)
 
     UIControls.SelectCombatSubtab = function(name, manual)
         if not UIControls.CombatSubPages[name] then return end
@@ -1678,10 +1678,34 @@ UIControls.SetupCombatPage = function()
     addEmptyRoleText(murderPage, "Murder", "Murder role detected. Role-specific functions can be added here.")
     addEmptyRoleText(sheriffPage, "Sheriff", "Sheriff / Hero role detected. Role-specific functions can be added here.")
 
-    local function makeCombatButton(parent, y, title, accent, callback)
+    local universalScroll = New("ScrollingFrame", {
+        Name = "UniversalFlingScroll",
+        Size = UDim2.fromScale(1, 1),
+        CanvasSize = UDim2.fromOffset(0, 0),
+        AutomaticCanvasSize = Enum.AutomaticSize.Y,
+        BackgroundTransparency = 1,
+        BorderSizePixel = 0,
+        ScrollBarThickness = 2,
+        ScrollBarImageColor3 = Config.WaterBright,
+        ZIndex = 106,
+    })
+    universalScroll.Parent = universalPage
+
+    local universalList = New("UIListLayout", {
+        Padding = UDim.new(0, 7),
+        SortOrder = Enum.SortOrder.LayoutOrder,
+    })
+    universalList.Parent = universalScroll
+
+    local universalPadding = New("UIPadding", {
+        PaddingBottom = UDim.new(0, 8),
+        PaddingRight = UDim.new(0, 3),
+    })
+    universalPadding.Parent = universalScroll
+
+    local function makeUniversalButton(title, accent, callback)
         local button = New("TextButton", {
-            Position = UDim2.fromOffset(0, y),
-            Size = UDim2.new(1, 0, 0, 40),
+            Size = UDim2.new(1, -3, 0, 38),
             BackgroundColor3 = accent,
             BackgroundTransparency = 0.18,
             BorderSizePixel = 0,
@@ -1692,43 +1716,187 @@ UIControls.SetupCombatPage = function()
             AutoButtonColor = false,
             ZIndex = 107,
         })
-        button.Parent = parent
+        button.Parent = universalScroll
         Corner(button, 11)
         Stroke(button, Config.Border, 0.12, 1)
-
         Connect(button.MouseButton1Click, function()
             PlayClickSound()
             callback()
         end)
-
         return button
     end
 
-    UIControls.FlingMurderButton = makeCombatButton(
-        innocentPage,
-        0,
-        "Fling Murder",
-        Color3.fromRGB(86, 40, 48),
-        function()
-            if UIControls.FlingRole then UIControls.FlingRole("Murderer") end
-        end
-    )
+    UIControls.FlingMurderButton = makeUniversalButton("Fling Murder", Color3.fromRGB(86, 40, 48), function()
+        if UIControls.FlingRole then UIControls.FlingRole("Murderer") end
+    end)
 
-    UIControls.FlingSheriffButton = makeCombatButton(
-        innocentPage,
-        48,
-        "Fling Sheriff",
-        Color3.fromRGB(38, 61, 91),
-        function()
-            if UIControls.FlingRole then UIControls.FlingRole("Sheriff") end
+    UIControls.FlingSheriffButton = makeUniversalButton("Fling Sheriff", Color3.fromRGB(38, 61, 91), function()
+        if UIControls.FlingRole then UIControls.FlingRole("Sheriff") end
+    end)
+
+    local queryCard = New("Frame", {
+        Size = UDim2.new(1, -3, 0, 78),
+        BackgroundColor3 = Config.Panel2,
+        BackgroundTransparency = 0.05,
+        BorderSizePixel = 0,
+        ZIndex = 107,
+    })
+    queryCard.Parent = universalScroll
+    Corner(queryCard, 11)
+    Stroke(queryCard, Config.Border, 0.10, 1)
+
+    local queryBox = New("TextBox", {
+        Position = UDim2.fromOffset(8, 8),
+        Size = UDim2.new(1, -16, 0, 28),
+        BackgroundColor3 = Color3.fromRGB(27, 34, 46),
+        BackgroundTransparency = 0.04,
+        BorderSizePixel = 0,
+        ClearTextOnFocus = false,
+        PlaceholderText = "Username or display name",
+        PlaceholderColor3 = Config.Muted,
+        Text = "",
+        TextColor3 = Config.Text,
+        TextSize = 9,
+        Font = Enum.Font.Gotham,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        ZIndex = 108,
+    })
+    queryBox.Parent = queryCard
+    Corner(queryBox, 9)
+
+    local flingByName = New("TextButton", {
+        Position = UDim2.fromOffset(8, 42),
+        Size = UDim2.new(1, -16, 0, 28),
+        BackgroundColor3 = Config.Water,
+        BackgroundTransparency = 0.14,
+        BorderSizePixel = 0,
+        Text = "Fling by nickname",
+        TextColor3 = Config.Text,
+        TextSize = 9,
+        Font = Enum.Font.GothamSemibold,
+        AutoButtonColor = false,
+        ZIndex = 108,
+    })
+    flingByName.Parent = queryCard
+    Corner(flingByName, 9)
+    Connect(flingByName.MouseButton1Click, function()
+        PlayClickSound()
+        if UIControls.FlingPlayerByQuery then UIControls.FlingPlayerByQuery(queryBox.Text) end
+    end)
+
+    local selector = New("TextButton", {
+        Size = UDim2.new(1, -3, 0, 38),
+        BackgroundColor3 = Config.Panel2,
+        BackgroundTransparency = 0.05,
+        BorderSizePixel = 0,
+        Text = "Selected player: None  ▼",
+        TextColor3 = Config.Text,
+        TextSize = 9,
+        Font = Enum.Font.GothamSemibold,
+        AutoButtonColor = false,
+        ZIndex = 110,
+    })
+    selector.Parent = universalScroll
+    Corner(selector, 11)
+    Stroke(selector, Config.Border, 0.10, 1)
+    UIControls.UniversalPlayerSelector = selector
+
+    local playerList = New("Frame", {
+        Size = UDim2.new(1, -3, 0, 0),
+        BackgroundColor3 = Color3.fromRGB(22, 28, 39),
+        BackgroundTransparency = 0.02,
+        BorderSizePixel = 0,
+        ClipsDescendants = true,
+        Visible = false,
+        ZIndex = 120,
+    })
+    playerList.Parent = universalScroll
+    Corner(playerList, 11)
+    Stroke(playerList, Config.Border, 0.08, 1)
+
+    local playerScroll = New("ScrollingFrame", {
+        Position = UDim2.fromOffset(5, 5),
+        Size = UDim2.new(1, -10, 1, -10),
+        CanvasSize = UDim2.fromOffset(0, 0),
+        AutomaticCanvasSize = Enum.AutomaticSize.Y,
+        BackgroundTransparency = 1,
+        BorderSizePixel = 0,
+        ScrollBarThickness = 2,
+        ScrollBarImageColor3 = Config.WaterBright,
+        ZIndex = 121,
+    })
+    playerScroll.Parent = playerList
+
+    local playerLayout = New("UIListLayout", {Padding = UDim.new(0, 4), SortOrder = Enum.SortOrder.LayoutOrder})
+    playerLayout.Parent = playerScroll
+
+    local listOpen = false
+    local function setListOpen(value)
+        listOpen = value and true or false
+        playerList.Visible = listOpen
+        playerList.Size = listOpen and UDim2.new(1, -3, 0, 112) or UDim2.new(1, -3, 0, 0)
+        selector.Text = "Selected player: " .. (UIControls.SelectedFlingPlayer and UIControls.SelectedFlingPlayer.DisplayName or "None") .. (listOpen and "  ▲" or "  ▼")
+    end
+
+    local function rebuildPlayerList()
+        for _, child in ipairs(playerScroll:GetChildren()) do
+            if child:IsA("TextButton") or child:IsA("TextLabel") then child:Destroy() end
         end
-    )
+
+        local found = 0
+        for _, player in ipairs(Players:GetPlayers()) do
+            if player ~= LocalPlayer then
+                found = found + 1
+                local playerButton = New("TextButton", {
+                    Size = UDim2.new(1, -2, 0, 28),
+                    BackgroundColor3 = Config.Panel2,
+                    BackgroundTransparency = 0.12,
+                    BorderSizePixel = 0,
+                    Text = player.DisplayName .. "  (@" .. player.Name .. ")",
+                    TextColor3 = Config.Text,
+                    TextSize = 8,
+                    Font = Enum.Font.Gotham,
+                    AutoButtonColor = false,
+                    ZIndex = 122,
+                })
+                playerButton.Parent = playerScroll
+                Corner(playerButton, 8)
+                Connect(playerButton.MouseButton1Click, function()
+                    PlayClickSound()
+                    UIControls.SelectedFlingPlayer = player
+                    setListOpen(false)
+                end)
+            end
+        end
+
+        if found == 0 then
+            local empty = New("TextLabel", {
+                Size = UDim2.new(1, -2, 0, 28),
+                BackgroundTransparency = 1,
+                Text = "No other players",
+                TextColor3 = Config.Muted,
+                TextSize = 8,
+                Font = Enum.Font.Gotham,
+                ZIndex = 122,
+            })
+            empty.Parent = playerScroll
+        end
+    end
+
+    Connect(selector.MouseButton1Click, function()
+        PlayClickSound()
+        if not listOpen then rebuildPlayerList() end
+        setListOpen(not listOpen)
+    end)
+
+    UIControls.FlingSelectedButton = makeUniversalButton("Fling selected player", Color3.fromRGB(58, 72, 101), function()
+        if UIControls.FlingPlayer then UIControls.FlingPlayer(UIControls.SelectedFlingPlayer) end
+    end)
 
     local status = New("TextLabel", {
-        Position = UDim2.fromOffset(4, 92),
-        Size = UDim2.new(1, -8, 0, 22),
+        Size = UDim2.new(1, -3, 0, 30),
         BackgroundTransparency = 1,
-        Text = "Innocent functions",
+        Text = "Universal fling is available for every role",
         TextColor3 = Config.Muted,
         TextSize = 8,
         Font = Enum.Font.Gotham,
@@ -1737,7 +1905,7 @@ UIControls.SetupCombatPage = function()
         TextYAlignment = Enum.TextYAlignment.Top,
         ZIndex = 107,
     })
-    status.Parent = innocentPage
+    status.Parent = universalScroll
     UIControls.CombatStatus = status
 
     UIControls.SetCombatRole = function(role)
@@ -1747,7 +1915,7 @@ UIControls.SetupCombatPage = function()
 
         local color = Config.Unknown
         local label = "Not in round"
-        local targetTab = nil
+        local targetTab = "Universal"
 
         if role == "Murderer" then
             color = Config.Murderer
@@ -1764,19 +1932,17 @@ UIControls.SetupCombatPage = function()
         elseif role == "Innocent" then
             color = Config.Innocent
             label = "Innocent"
-            targetTab = "Innocent"
+            targetTab = "Universal"
         end
 
         roleLabel.Text = "Your role: " .. label
         roleLabel.TextColor3 = color
 
-        if targetTab then
-            UIControls.CombatManualSelection = false
-            UIControls.SelectCombatSubtab(targetTab, false)
-        end
+        UIControls.CombatManualSelection = false
+        UIControls.SelectCombatSubtab(targetTab, false)
     end
 
-    UIControls.SelectCombatSubtab("Innocent", false)
+    UIControls.SelectCombatSubtab("Universal", false)
     UIControls.SetCombatRole("Unknown")
 end
 
@@ -5844,6 +6010,10 @@ local function RunYARHMFling(targetPlayer, generation, roleName)
         if LocalPlayer.Character ~= character or humanoid.Health <= 0 or not root.Parent then return false end
         if targetPlayer.Parent ~= Players or targetPlayer.Character ~= targetCharacter then return false end
         if not targetHumanoid.Parent or targetHumanoid.Health <= 0 then return false end
+        if roleName == nil or roleName == "Player" then
+            return true
+        end
+
         local role = GetRole(targetPlayer)
         if roleName == "Sheriff" then
             return role == "Sheriff" or role == "Hero"
@@ -5975,14 +6145,6 @@ UIControls.FlingRole = function(roleName)
 
     RefreshRemoteRoles()
 
-    local myRole = GetRole(LocalPlayer)
-    if myRole ~= "Innocent" then
-        if UIControls.CombatStatus then
-            UIControls.CombatStatus.Text = "Fling Murder / Sheriff is available in the Innocent role"
-        end
-        return
-    end
-
     local target = FindLivingRoleTarget(roleName)
     if not target then
         if UIControls.CombatStatus then
@@ -6012,6 +6174,92 @@ UIControls.FlingRole = function(roleName)
             end
         end
     end)
+end
+
+local function FindPlayerByQuery(query)
+    query = tostring(query or ""):match("^%s*(.-)%s*$")
+    if query == "" then return nil end
+
+    local lowered = string.lower(query)
+    local exact = nil
+    local prefix = nil
+
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player ~= LocalPlayer then
+            local username = string.lower(player.Name)
+            local display = string.lower(player.DisplayName or player.Name)
+            if username == lowered or display == lowered then
+                exact = player
+                break
+            end
+            if not prefix and (string.sub(username, 1, #lowered) == lowered or string.sub(display, 1, #lowered) == lowered) then
+                prefix = player
+            end
+        end
+    end
+
+    return exact or prefix
+end
+
+UIControls.FlingPlayer = function(target)
+    if UIControls.FlingBusy then
+        if UIControls.CombatStatus then UIControls.CombatStatus.Text = "Fling is already running" end
+        return
+    end
+
+    if Config.CoinFarmEnabled or Config.FlyEnabled then
+        if UIControls.CombatStatus then UIControls.CombatStatus.Text = "Turn off Auto Coin Farm / Fly before Fling" end
+        return
+    end
+
+    if not target or target == LocalPlayer or target.Parent ~= Players then
+        if UIControls.CombatStatus then UIControls.CombatStatus.Text = "Select a valid player first" end
+        return
+    end
+
+    local character = target.Character
+    local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+    local root = character and character:FindFirstChild("HumanoidRootPart")
+    if not humanoid or humanoid.Health <= 0 or not root or root.Anchored then
+        if UIControls.CombatStatus then UIControls.CombatStatus.Text = "Selected player is dead or unavailable" end
+        return
+    end
+
+    UIControls.FlingBusy = true
+    UIControls.FlingGeneration = UIControls.FlingGeneration + 1
+    local generation = UIControls.FlingGeneration
+
+    if UIControls.CombatStatus then
+        UIControls.CombatStatus.Text = "Fling player: " .. target.DisplayName
+    end
+
+    task.spawn(function()
+        local ok, err = RunYARHMFling(target, generation, "Player")
+        if generation == UIControls.FlingGeneration then
+            UIControls.FlingBusy = false
+            if UIControls.CombatStatus then
+                if ok then
+                    UIControls.CombatStatus.Text = "Fling finished • returned"
+                else
+                    UIControls.CombatStatus.Text = "Fling stopped: " .. tostring(err or "target unavailable")
+                end
+            end
+        end
+    end)
+end
+
+UIControls.FlingPlayerByQuery = function(query)
+    local target = FindPlayerByQuery(query)
+    if not target then
+        if UIControls.CombatStatus then UIControls.CombatStatus.Text = "Player not found" end
+        return
+    end
+
+    UIControls.SelectedFlingPlayer = target
+    if UIControls.UniversalPlayerSelector then
+        UIControls.UniversalPlayerSelector.Text = "Selected player: " .. target.DisplayName .. "  ▼"
+    end
+    UIControls.FlingPlayer(target)
 end
 
 --// ============================================================
