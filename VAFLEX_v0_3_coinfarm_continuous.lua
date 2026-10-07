@@ -1371,12 +1371,14 @@ do
         LastWarningAt = 0,
 
         DesyncHeartbeat = nil,
-        DesyncRender = nil,
+        DesyncRestore = nil,
         DesyncCharacter = nil,
         DesyncRoot = nil,
-        DesyncRealCFrame = nil,
-        DesyncLinearVelocity = nil,
-        DesyncAngularVelocity = nil,
+        DesyncRealVelocity = nil,
+        DesyncRealAngularVelocity = nil,
+        DesyncRealHumanoidState = nil,
+        DesyncHumanoid = nil,
+        DesyncSpoofVelocity = Vector3.zero,
         DesyncSpoofed = false,
     }
 
@@ -1438,7 +1440,7 @@ do
         Position = UDim2.fromOffset(14, 9),
         Size = UDim2.new(1, -84, 0, 22),
         BackgroundTransparency = 1,
-        Text = "Executor Desync Anti-Aim",
+        Text = "Desync Anti-Aim",
         TextColor3 = Config.Text,
         TextSize = 11,
         Font = Enum.Font.GothamSemibold,
@@ -1451,7 +1453,7 @@ do
         Position = UDim2.fromOffset(14, 32),
         Size = UDim2.new(1, -84, 0, 48),
         BackgroundTransparency = 1,
-        Text = "Experimental replication desync. Spoofs the root off-map between local simulation and rendering, then restores it before the next rendered frame.",
+        Text = "SYDJA predictor breaker. Keeps CFrame/camera unchanged while spoofing bounded XZ velocity and fresh airborne Y samples that its ping predictor accepts.",
         TextColor3 = Config.Muted,
         TextSize = 8,
         Font = Enum.Font.Gotham,
@@ -1539,51 +1541,110 @@ do
         end)
     end
 
-    local function restoreDesyncRoot()
+    local function restoreDesyncVelocity()
         local root = defenseState.DesyncRoot
-        if defenseState.DesyncSpoofed and root and root.Parent and defenseState.DesyncRealCFrame then
-            pcall(function()
-                root.CFrame = defenseState.DesyncRealCFrame
-                if defenseState.DesyncLinearVelocity then
-                    root.AssemblyLinearVelocity = defenseState.DesyncLinearVelocity
-                end
-                if defenseState.DesyncAngularVelocity then
-                    root.AssemblyAngularVelocity = defenseState.DesyncAngularVelocity
-                end
-            end)
+        local humanoid = defenseState.DesyncHumanoid
+
+        if defenseState.DesyncSpoofed then
+            if root and root.Parent then
+                pcall(function()
+                    if defenseState.DesyncRealVelocity then
+                        root.AssemblyLinearVelocity = defenseState.DesyncRealVelocity
+                        root.Velocity = defenseState.DesyncRealVelocity
+                    end
+                    if defenseState.DesyncRealAngularVelocity then
+                        root.AssemblyAngularVelocity = defenseState.DesyncRealAngularVelocity
+                        root.RotVelocity = defenseState.DesyncRealAngularVelocity
+                    end
+                end)
+            end
+
+            if humanoid and humanoid.Parent and defenseState.DesyncRealHumanoidState then
+                pcall(function()
+                    humanoid:ChangeState(defenseState.DesyncRealHumanoidState)
+                end)
+            end
         end
+
         defenseState.DesyncSpoofed = false
     end
 
     local function stopExecutorDesync()
-        restoreDesyncRoot()
-        UIControls.DesyncSpoofCFrame = nil
+        restoreDesyncVelocity()
 
         if defenseState.DesyncHeartbeat then
             defenseState.DesyncHeartbeat:Disconnect()
             defenseState.DesyncHeartbeat = nil
         end
-        if defenseState.DesyncRender then
-            defenseState.DesyncRender:Disconnect()
-            defenseState.DesyncRender = nil
+        if defenseState.DesyncRestore then
+            defenseState.DesyncRestore:Disconnect()
+            defenseState.DesyncRestore = nil
         end
 
         defenseState.DesyncCharacter = nil
         defenseState.DesyncRoot = nil
-        defenseState.DesyncRealCFrame = nil
-        defenseState.DesyncLinearVelocity = nil
-        defenseState.DesyncAngularVelocity = nil
+        defenseState.DesyncRealVelocity = nil
+        defenseState.DesyncRealAngularVelocity = nil
+        defenseState.DesyncRealHumanoidState = nil
+        defenseState.DesyncHumanoid = nil
+        defenseState.DesyncSpoofVelocity = Vector3.zero
         defenseState.DesyncSpoofed = false
+
+        UIControls.DesyncSpoofVelocity = Vector3.zero
+    end
+
+    local function buildSpoofVelocity(root)
+        local now = os.clock()
+
+        -- Uploaded SYDJA predictor behavior:
+        --   * horizontal velocity > 90 is rejected and falls back toward direct aim;
+        --   * horizontal lead is capped to roughly 0.85 studs;
+        --   * vertical velocity is accepted while |Y| <= 90;
+        --   * a fresh Jumping sample can create up to ~6 studs of vertical lead.
+        --
+        -- Therefore huge 1000+ stud/s spoofing is counterproductive against it.
+        -- Stay inside its accepted range and make the accepted samples wrong.
+
+        local phase = math.floor(now / 0.043) % 4
+
+        -- Keep horizontal magnitude below SYDJA's 90 stud/s rejection threshold.
+        -- The direction changes frequently, which repeatedly trips its "fresh turn"
+        -- branch before measured displacement can fully settle the predictor.
+        local horizontal
+        if phase == 0 then
+            horizontal = Vector3.new(72, 0, 28)
+        elseif phase == 1 then
+            horizontal = Vector3.new(-68, 0, 34)
+        elseif phase == 2 then
+            horizontal = Vector3.new(30, 0, -74)
+        else
+            horizontal = Vector3.new(-36, 0, -70)
+        end
+
+        -- Keep Y positive so its falling-floor clamp never helps it.
+        -- Change by >12 stud/s between phases so observeVertical() keeps refreshing
+        -- yFreshUntil instead of dropping prediction after a few milliseconds.
+        local y
+        if phase == 0 then
+            y = 84
+        elseif phase == 1 then
+            y = 58
+        elseif phase == 2 then
+            y = 82
+        else
+            y = 56
+        end
+
+        return Vector3.new(horizontal.X, y, horizontal.Z)
     end
 
     local function startExecutorDesync()
         stopExecutorDesync()
         if not Config.DesyncAntiAimEnabled then return end
 
-        -- Heartbeat is intentionally used for the spoof phase while RenderStepped
-        -- restores the local visible position before the next frame is presented.
-        -- Whether the server/other clients observe the spoof depends on the current
-        -- Roblox replication path and executor environment.
+        -- Position/CFrame is never modified here. That keeps the camera attached
+        -- to the real character and avoids the old "camera follows hitbox off-map"
+        -- problem.
         defenseState.DesyncHeartbeat = RunService.Heartbeat:Connect(function()
             if not Running or not Config.DesyncAntiAimEnabled then return end
 
@@ -1596,49 +1657,61 @@ do
             end
 
             if defenseState.DesyncSpoofed then
-                restoreDesyncRoot()
+                restoreDesyncVelocity()
             end
 
             defenseState.DesyncCharacter = character
             defenseState.DesyncRoot = root
-            defenseState.DesyncRealCFrame = root.CFrame
-            defenseState.DesyncLinearVelocity = root.AssemblyLinearVelocity
-            defenseState.DesyncAngularVelocity = root.AssemblyAngularVelocity
+            defenseState.DesyncHumanoid = humanoid
+            defenseState.DesyncRealVelocity = root.AssemblyLinearVelocity
+            defenseState.DesyncRealAngularVelocity = root.AssemblyAngularVelocity
 
-            -- Keep X/Z and rotation correlated with the visible character but move
-            -- the replicated physics root far below the playable map.
-            local real = defenseState.DesyncRealCFrame
-            local position = real.Position
-            local rotation = real - real.Position
-            local spoof = CFrame.new(position.X, -10000, position.Z) * rotation
-            UIControls.DesyncSpoofCFrame = spoof
+            local okState, originalState = pcall(function()
+                return humanoid:GetState()
+            end)
+            defenseState.DesyncRealHumanoidState = okState and originalState or nil
+
+            local spoofVelocity = buildSpoofVelocity(root)
+            defenseState.DesyncSpoofVelocity = spoofVelocity
+            UIControls.DesyncSpoofVelocity = spoofVelocity
 
             pcall(function()
-                root.CFrame = spoof
-                root.AssemblyLinearVelocity = Vector3.zero
+                -- CFrame is deliberately untouched: camera and visible body stay put.
+                root.AssemblyLinearVelocity = spoofVelocity
+                root.Velocity = spoofVelocity
                 root.AssemblyAngularVelocity = Vector3.zero
+                root.RotVelocity = Vector3.zero
+
+                -- SYDJA only applies its strong vertical branch while it believes
+                -- the target is Jumping/Freefall. This pulse is restored before
+                -- the next rendered frame / next physics step.
+                humanoid:ChangeState(Enum.HumanoidStateType.Jumping)
+
                 defenseState.DesyncSpoofed = true
             end)
         end)
 
-        defenseState.DesyncRender = RunService.RenderStepped:Connect(function()
+        -- Restore before the next rendered frame. Since CFrame never changes,
+        -- the camera remains on the visible body.
+        local restoreSignal = RunService.PreRender or RunService.RenderStepped
+        defenseState.DesyncRestore = restoreSignal:Connect(function()
             if not Running or not Config.DesyncAntiAimEnabled then
-                restoreDesyncRoot()
+                restoreDesyncVelocity()
                 return
             end
 
             if defenseState.DesyncCharacter ~= LocalPlayer.Character then
-                restoreDesyncRoot()
+                restoreDesyncVelocity()
                 defenseState.DesyncCharacter = nil
                 defenseState.DesyncRoot = nil
                 return
             end
 
-            restoreDesyncRoot()
+            restoreDesyncVelocity()
         end)
 
         if UIControls.DefenseStatus then
-            UIControls.DefenseStatus.Text = "Executor Desync enabled • experimental replication timing"
+            UIControls.DefenseStatus.Text = "SYDJA predictor breaker enabled • CFrame unchanged"
         end
     end
 
@@ -1654,9 +1727,9 @@ do
 
         if UIControls.DefenseStatus then
             if value then
-                UIControls.DefenseStatus.Text = "Executor Desync enabled • experimental replication timing"
+                UIControls.DefenseStatus.Text = "SYDJA predictor breaker enabled • CFrame unchanged"
             else
-                UIControls.DefenseStatus.Text = Config.AntiFlingEnabled and "Anti Fling enabled" or "Executor Desync disabled"
+                UIControls.DefenseStatus.Text = Config.AntiFlingEnabled and "Anti Fling enabled" or "Desync Anti-Aim disabled"
             end
         end
 
@@ -1709,7 +1782,7 @@ do
     end)
 
     Connect(LocalPlayer.CharacterRemoving, function()
-        restoreDesyncRoot()
+        restoreDesyncVelocity()
         defenseState.DesyncCharacter = nil
         defenseState.DesyncRoot = nil
     end)
@@ -2484,12 +2557,12 @@ UIControls.SetupMyESPSection = function()
     )
 
     local positionLabel = New("TextLabel", {
-        Position = UDim2.fromOffset(10, 104),
-        Size = UDim2.new(1, -20, 0, 30),
+        Position = UDim2.fromOffset(10, 103),
+        Size = UDim2.new(1, -20, 0, 34),
         BackgroundTransparency = 1,
-        Text = "Hitbox position: unavailable",
+        Text = "Local: unavailable\nServer estimate: unavailable",
         TextColor3 = Config.Muted,
-        TextSize = 8,
+        TextSize = 7,
         Font = Enum.Font.Gotham,
         TextWrapped = true,
         TextXAlignment = Enum.TextXAlignment.Left,
@@ -2499,165 +2572,267 @@ UIControls.SetupMyESPSection = function()
     positionLabel.Parent = body
     UIControls.MyHitboxPositionLabel = positionLabel
 
-    local function destroyMarker()
-        if UIControls.MyHitboxMarker then
-            pcall(function() UIControls.MyHitboxMarker:Destroy() end)
-            UIControls.MyHitboxMarker = nil
-        end
-        if UIControls.MyHitboxMarkerHighlight then
-            pcall(function() UIControls.MyHitboxMarkerHighlight:Destroy() end)
-            UIControls.MyHitboxMarkerHighlight = nil
-        end
-        if UIControls.MyHitboxMarkerBillboard then
-            pcall(function() UIControls.MyHitboxMarkerBillboard:Destroy() end)
-            UIControls.MyHitboxMarkerBillboard = nil
+    UIControls.MyHitboxHistory = UIControls.MyHitboxHistory or {}
+
+    local function clearHistory()
+        table.clear(UIControls.MyHitboxHistory)
+    end
+
+    local function pushHistory(root)
+        local history = UIControls.MyHitboxHistory
+        local now = os.clock()
+
+        history[#history + 1] = {
+            Time = now,
+            CFrame = root.CFrame,
+            Velocity = root.AssemblyLinearVelocity,
+        }
+
+        -- Keep roughly the last 1.5 seconds. This is enough for normal latency
+        -- and also follows turns/jumps better than Position - Velocity * ping.
+        local cutoff = now - 1.5
+        while #history > 2 and history[1].Time < cutoff do
+            table.remove(history, 1)
         end
     end
 
-    local function ensureMarker()
-        local marker = UIControls.MyHitboxMarker
+    local function getPingSeconds()
+        local ok, ping = pcall(function()
+            return LocalPlayer:GetNetworkPing()
+        end)
+        if ok and type(ping) == "number" and ping >= 0 and ping < 5 then
+            return ping
+        end
+        return 0
+    end
+
+    local function getNetworkEstimate(root)
+        local ping = getPingSeconds()
+
+        -- GetNetworkPing is latency information available to the client, not a
+        -- direct read of the server's authoritative character state. Use half
+        -- the measured delay as a one-way estimate and sample our actual CFrame
+        -- history at that time instead of extrapolating only from velocity.
+        local oneWay = math.clamp(ping * 0.5, 0, 0.45)
+        local targetTime = os.clock() - oneWay
+        local history = UIControls.MyHitboxHistory
+
+        if #history == 0 then
+            return root.CFrame, ping
+        end
+
+        local before = history[1]
+        local after = history[#history]
+
+        for i = #history, 1, -1 do
+            local sample = history[i]
+            if sample.Time <= targetTime then
+                before = sample
+                after = history[math.min(i + 1, #history)]
+                break
+            end
+        end
+
+        if before == after or after.Time <= before.Time then
+            return before.CFrame, ping
+        end
+
+        local alpha = math.clamp(
+            (targetTime - before.Time) / (after.Time - before.Time),
+            0,
+            1
+        )
+
+        return before.CFrame:Lerp(after.CFrame, alpha), ping
+    end
+
+    local function destroyMarker(prefix)
+        local markerKey = prefix .. "Marker"
+        local highlightKey = prefix .. "Highlight"
+        local billboardKey = prefix .. "Billboard"
+        local textKey = prefix .. "Text"
+
+        if UIControls[markerKey] then
+            pcall(function() UIControls[markerKey]:Destroy() end)
+        end
+
+        UIControls[markerKey] = nil
+        UIControls[highlightKey] = nil
+        UIControls[billboardKey] = nil
+        UIControls[textKey] = nil
+    end
+
+    local function ensureMarker(prefix, color, title)
+        local markerKey = prefix .. "Marker"
+        local highlightKey = prefix .. "Highlight"
+        local billboardKey = prefix .. "Billboard"
+        local textKey = prefix .. "Text"
+
+        local marker = UIControls[markerKey]
         if marker and marker.Parent then
             return marker
         end
 
-        destroyMarker()
+        destroyMarker(prefix)
 
         marker = New("Part", {
-            Name = "VAFLEX_MY_HITBOX_DEBUG",
+            Name = "VAFLEX_" .. prefix,
             Anchored = true,
             CanCollide = false,
             CanTouch = false,
             CanQuery = false,
             CastShadow = false,
             Material = Enum.Material.Neon,
-            Color = Config.WaterBright,
-            Transparency = 0.72,
+            Color = color,
+            Transparency = 0.78,
             Size = Vector3.new(2, 2, 1),
         })
         marker.Parent = workspace
-        UIControls.MyHitboxMarker = marker
+        UIControls[markerKey] = marker
 
-        local markerHighlight = New("Highlight", {
-            Name = "VAFLEX_MY_HITBOX_HIGHLIGHT",
+        local highlight = New("Highlight", {
+            Name = "VAFLEX_" .. prefix .. "_HIGHLIGHT",
             Adornee = marker,
             DepthMode = Enum.HighlightDepthMode.AlwaysOnTop,
-            FillColor = Config.WaterBright,
-            OutlineColor = Config.WaterWhite,
-            FillTransparency = 0.68,
+            FillColor = color,
+            OutlineColor = color,
+            FillTransparency = 0.76,
             OutlineTransparency = 0,
             Enabled = true,
         })
-        markerHighlight.Parent = marker
-        UIControls.MyHitboxMarkerHighlight = markerHighlight
+        highlight.Parent = marker
+        UIControls[highlightKey] = highlight
 
         local billboard = New("BillboardGui", {
-            Name = "VAFLEX_MY_HITBOX_LABEL",
+            Name = "VAFLEX_" .. prefix .. "_LABEL",
             Adornee = marker,
-            Size = UDim2.fromOffset(170, 42),
-            StudsOffset = Vector3.new(0, 2.1, 0),
+            Size = UDim2.fromOffset(165, 34),
+            StudsOffset = Vector3.new(0, 2.2, 0),
             AlwaysOnTop = true,
             LightInfluence = 0,
         })
         billboard.Parent = marker
-        UIControls.MyHitboxMarkerBillboard = billboard
+        UIControls[billboardKey] = billboard
 
         local label = New("TextLabel", {
             Size = UDim2.fromScale(1, 1),
             BackgroundTransparency = 1,
-            Text = "MY HITBOX",
-            TextColor3 = Config.WaterWhite,
-            TextSize = 11,
+            Text = title,
+            TextColor3 = color,
+            TextSize = 9,
             Font = Enum.Font.GothamBold,
             TextStrokeColor3 = Color3.fromRGB(5, 8, 12),
-            TextStrokeTransparency = 0.2,
+            TextStrokeTransparency = 0.15,
             TextWrapped = true,
         })
         label.Parent = billboard
-        UIControls.MyHitboxMarkerText = label
+        UIControls[textKey] = label
 
         return marker
     end
 
+    local function setMarkerVisible(prefix, value)
+        local marker = UIControls[prefix .. "Marker"]
+        local highlight = UIControls[prefix .. "Highlight"]
+        local billboard = UIControls[prefix .. "Billboard"]
+
+        if marker then marker.Transparency = value and 0.78 or 1 end
+        if highlight then highlight.Enabled = value end
+        if billboard then billboard.Enabled = value end
+    end
+
     UIControls.DestroyMyHitboxESP = function()
-        destroyMarker()
+        destroyMarker("MyLocalHitbox")
+        destroyMarker("MyServerHitbox")
+        clearHistory()
+
         if UIControls.MyHitboxPositionLabel then
-            UIControls.MyHitboxPositionLabel.Text = "Hitbox position: unavailable"
+            UIControls.MyHitboxPositionLabel.Text = "Local: unavailable\nServer estimate: unavailable"
         end
     end
+
+    Connect(LocalPlayer.CharacterAdded, function()
+        clearHistory()
+    end)
+
+    Connect(LocalPlayer.CharacterRemoving, function()
+        clearHistory()
+    end)
 
     Connect(RunService.Heartbeat, function()
         if not Running then return end
 
         local character = LocalPlayer.Character
+        local humanoid = character and character:FindFirstChildOfClass("Humanoid")
         local root = character and character:FindFirstChild("HumanoidRootPart")
 
-        if not root then
+        if not root or not humanoid or humanoid.Health <= 0 then
+            setMarkerVisible("MyLocalHitbox", false)
+            setMarkerVisible("MyServerHitbox", false)
+
             if UIControls.MyHitboxPositionLabel then
-                UIControls.MyHitboxPositionLabel.Text = "Hitbox position: unavailable"
-            end
-            if UIControls.MyHitboxMarker then
-                UIControls.MyHitboxMarker.Transparency = 1
-                if UIControls.MyHitboxMarkerHighlight then
-                    UIControls.MyHitboxMarkerHighlight.Enabled = false
-                end
-                if UIControls.MyHitboxMarkerBillboard then
-                    UIControls.MyHitboxMarkerBillboard.Enabled = false
-                end
+                UIControls.MyHitboxPositionLabel.Text = "Local: unavailable\nServer estimate: unavailable"
             end
             return
         end
 
-        local targetCFrame
-        local sourceText
+        pushHistory(root)
 
-        if Config.DesyncAntiAimEnabled and UIControls.DesyncSpoofCFrame then
-            targetCFrame = UIControls.DesyncSpoofCFrame
-            sourceText = "desync target"
-        else
-            targetCFrame = root.CFrame
-            sourceText = "visible root"
-        end
+        local localCFrame = root.CFrame
+        local serverCFrame, ping = getNetworkEstimate(root)
+        local localPos = localCFrame.Position
+        local serverPos = serverCFrame.Position
 
-        local position = targetCFrame.Position
+        UIControls.MyEstimatedServerCFrame = serverCFrame
+        UIControls.MyEstimatedServerPosition = serverPos
 
         if UIControls.MyHitboxPositionLabel then
+            local spoof = UIControls.DesyncSpoofVelocity or Vector3.zero
             UIControls.MyHitboxPositionLabel.Text = string.format(
-                "Hitbox position: %.1f, %.1f, %.1f  •  %s",
-                position.X,
-                position.Y,
-                position.Z,
-                sourceText
+                "Local: %.1f, %.1f, %.1f\nServer est: %.1f, %.1f, %.1f • %.0f ms | Spoof Y: %.0f",
+                localPos.X, localPos.Y, localPos.Z,
+                serverPos.X, serverPos.Y, serverPos.Z,
+                ping * 1000,
+                spoof.Y
             )
         end
 
         if not Config.ShowMyHitbox then
-            if UIControls.MyHitboxMarker then
-                UIControls.MyHitboxMarker.Transparency = 1
-            end
-            if UIControls.MyHitboxMarkerHighlight then
-                UIControls.MyHitboxMarkerHighlight.Enabled = false
-            end
-            if UIControls.MyHitboxMarkerBillboard then
-                UIControls.MyHitboxMarkerBillboard.Enabled = false
-            end
+            setMarkerVisible("MyLocalHitbox", false)
+            setMarkerVisible("MyServerHitbox", false)
             return
         end
 
-        local marker = ensureMarker()
-        marker.CFrame = targetCFrame
-        marker.Size = root.Size
-        marker.Transparency = 0.72
+        local localMarker = ensureMarker(
+            "MyLocalHitbox",
+            Config.WaterBright,
+            "LOCAL HITBOX"
+        )
+        local serverMarker = ensureMarker(
+            "MyServerHitbox",
+            Color3.fromRGB(255, 215, 80),
+            "SERVER HITBOX EST."
+        )
 
-        if UIControls.MyHitboxMarkerHighlight then
-            UIControls.MyHitboxMarkerHighlight.Enabled = true
+        localMarker.CFrame = localCFrame
+        localMarker.Size = root.Size
+
+        serverMarker.CFrame = serverCFrame
+        serverMarker.Size = root.Size
+
+        setMarkerVisible("MyLocalHitbox", true)
+        setMarkerVisible("MyServerHitbox", true)
+
+        local localText = UIControls.MyLocalHitboxText
+        if localText then
+            localText.Text = "LOCAL HITBOX"
         end
-        if UIControls.MyHitboxMarkerBillboard then
-            UIControls.MyHitboxMarkerBillboard.Enabled = true
-        end
-        if UIControls.MyHitboxMarkerText then
-            UIControls.MyHitboxMarkerText.Text = string.format(
-                "MY HITBOX\nY %.1f",
-                position.Y
+
+        local serverText = UIControls.MyServerHitboxText
+        if serverText then
+            serverText.Text = string.format(
+                "SERVER EST. • %.0f ms",
+                ping * 1000
             )
         end
     end)
@@ -5560,7 +5735,7 @@ do
         if Config.NoclipEnabled then table.insert(names, "Noclip") end
         if Config.CoinFarmEnabled then table.insert(names, "Coin Farm  " .. tostring(Config.CoinFarmSpeed)) end
         if Config.AntiFlingEnabled then table.insert(names, "Anti Fling") end
-        if Config.DesyncAntiAimEnabled then table.insert(names, "Desync Anti-Aim") end
+        if Config.DesyncAntiAimEnabled then table.insert(names, "SYDJA Breaker") end
         return names
     end
 
