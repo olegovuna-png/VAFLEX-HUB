@@ -36,6 +36,8 @@ local Config = {
     Version = "0.3",
 
     RoleESP = true,
+    MyRoleESP = true,
+    ShowMyHitbox = false,
     GunESP = true,
     MaxDistance = 2500,
 
@@ -75,6 +77,7 @@ local Config = {
     CoinFarmEnabled = false,
     CoinFarmSpeed = 22,
     AntiFlingEnabled = false,
+    DesyncAntiAimEnabled = false,
 
     -- Small on-screen list of currently enabled functions
     FunctionsHUDEnabled = false,
@@ -1031,7 +1034,7 @@ local Main = New("Frame", {
     Name = "Main",
     AnchorPoint = Vector2.new(0.5, 0.5),
     Position = UDim2.fromScale(0.5, 0.5),
-    Size = UDim2.fromOffset(430, 320),
+    Size = UDim2.fromOffset(430, 355),
     BackgroundColor3 = Config.Panel,
     BackgroundTransparency = 0.12,
     BorderSizePixel = 0,
@@ -1366,23 +1369,32 @@ do
         Connection = nil,
         LastSafeCFrame = nil,
         LastWarningAt = 0,
+
+        DesyncHeartbeat = nil,
+        DesyncRender = nil,
+        DesyncCharacter = nil,
+        DesyncRoot = nil,
+        DesyncRealCFrame = nil,
+        DesyncLinearVelocity = nil,
+        DesyncAngularVelocity = nil,
+        DesyncSpoofed = false,
     }
 
-    local card = New("Frame", {
+    local antiFlingCard = New("Frame", {
         Name = "AntiFlingCard",
         Position = UDim2.fromOffset(0, 58),
-        Size = UDim2.new(1, 0, 0, 82),
+        Size = UDim2.new(1, 0, 0, 78),
         BackgroundColor3 = Config.Panel2,
         BackgroundTransparency = 0.05,
         BorderSizePixel = 0,
         ZIndex = 105,
     })
-    card.Parent = DefensePage
-    Corner(card, 13)
-    Stroke(card, Config.Border, 0.08, 1)
+    antiFlingCard.Parent = DefensePage
+    Corner(antiFlingCard, 13)
+    Stroke(antiFlingCard, Config.Border, 0.08, 1)
 
-    local title = New("TextLabel", {
-        Position = UDim2.fromOffset(14, 10),
+    local antiFlingTitle = New("TextLabel", {
+        Position = UDim2.fromOffset(14, 9),
         Size = UDim2.new(1, -84, 0, 22),
         BackgroundTransparency = 1,
         Text = "Anti Fling",
@@ -1392,10 +1404,10 @@ do
         TextXAlignment = Enum.TextXAlignment.Left,
         ZIndex = 106,
     })
-    title.Parent = card
+    antiFlingTitle.Parent = antiFlingCard
 
-    local desc = New("TextLabel", {
-        Position = UDim2.fromOffset(14, 34),
+    local antiFlingDesc = New("TextLabel", {
+        Position = UDim2.fromOffset(14, 32),
         Size = UDim2.new(1, -84, 0, 34),
         BackgroundTransparency = 1,
         Text = "Stops abnormal local velocity and returns you to the last stable position.",
@@ -1407,17 +1419,60 @@ do
         TextYAlignment = Enum.TextYAlignment.Top,
         ZIndex = 106,
     })
-    desc.Parent = card
+    antiFlingDesc.Parent = antiFlingCard
+
+    local antiAimCard = New("Frame", {
+        Name = "DesyncAntiAimCard",
+        Position = UDim2.fromOffset(0, 144),
+        Size = UDim2.new(1, 0, 0, 92),
+        BackgroundColor3 = Config.Panel2,
+        BackgroundTransparency = 0.05,
+        BorderSizePixel = 0,
+        ZIndex = 105,
+    })
+    antiAimCard.Parent = DefensePage
+    Corner(antiAimCard, 13)
+    Stroke(antiAimCard, Config.Border, 0.08, 1)
+
+    local antiAimTitle = New("TextLabel", {
+        Position = UDim2.fromOffset(14, 9),
+        Size = UDim2.new(1, -84, 0, 22),
+        BackgroundTransparency = 1,
+        Text = "Executor Desync Anti-Aim",
+        TextColor3 = Config.Text,
+        TextSize = 11,
+        Font = Enum.Font.GothamSemibold,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        ZIndex = 106,
+    })
+    antiAimTitle.Parent = antiAimCard
+
+    local antiAimDesc = New("TextLabel", {
+        Position = UDim2.fromOffset(14, 32),
+        Size = UDim2.new(1, -84, 0, 48),
+        BackgroundTransparency = 1,
+        Text = "Experimental replication desync. Spoofs the root off-map between local simulation and rendering, then restores it before the next rendered frame.",
+        TextColor3 = Config.Muted,
+        TextSize = 8,
+        Font = Enum.Font.Gotham,
+        TextWrapped = true,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        TextYAlignment = Enum.TextYAlignment.Top,
+        ZIndex = 106,
+    })
+    antiAimDesc.Parent = antiAimCard
 
     local status = New("TextLabel", {
-        Position = UDim2.fromOffset(4, 148),
-        Size = UDim2.new(1, -8, 0, 22),
+        Position = UDim2.fromOffset(4, 244),
+        Size = UDim2.new(1, -8, 0, 34),
         BackgroundTransparency = 1,
         Text = "Defense idle",
         TextColor3 = Config.Muted,
         TextSize = 8,
         Font = Enum.Font.Gotham,
+        TextWrapped = true,
         TextXAlignment = Enum.TextXAlignment.Left,
+        TextYAlignment = Enum.TextYAlignment.Top,
         ZIndex = 105,
     })
     status.Parent = DefensePage
@@ -1429,7 +1484,7 @@ do
             defenseState.Connection = nil
         end
         defenseState.LastSafeCFrame = nil
-        if UIControls.DefenseStatus then
+        if UIControls.DefenseStatus and not Config.DesyncAntiAimEnabled then
             UIControls.DefenseStatus.Text = "Anti Fling disabled"
         end
     end
@@ -1453,8 +1508,9 @@ do
                 return
             end
 
-            -- Do not fight VAFLEX movement modules while the user intentionally moves fast.
-            if Config.FlyEnabled or Config.CoinFarmEnabled or UIControls.FlingBusy then
+            -- The desync feature intentionally moves the root for a fraction of a frame.
+            -- Never let Anti Fling interpret that as an external fling.
+            if Config.DesyncAntiAimEnabled or Config.FlyEnabled or Config.CoinFarmEnabled or UIControls.FlingBusy then
                 defenseState.LastSafeCFrame = root.CFrame
                 return
             end
@@ -1483,9 +1539,133 @@ do
         end)
     end
 
+    local function restoreDesyncRoot()
+        local root = defenseState.DesyncRoot
+        if defenseState.DesyncSpoofed and root and root.Parent and defenseState.DesyncRealCFrame then
+            pcall(function()
+                root.CFrame = defenseState.DesyncRealCFrame
+                if defenseState.DesyncLinearVelocity then
+                    root.AssemblyLinearVelocity = defenseState.DesyncLinearVelocity
+                end
+                if defenseState.DesyncAngularVelocity then
+                    root.AssemblyAngularVelocity = defenseState.DesyncAngularVelocity
+                end
+            end)
+        end
+        defenseState.DesyncSpoofed = false
+    end
+
+    local function stopExecutorDesync()
+        restoreDesyncRoot()
+        UIControls.DesyncSpoofCFrame = nil
+
+        if defenseState.DesyncHeartbeat then
+            defenseState.DesyncHeartbeat:Disconnect()
+            defenseState.DesyncHeartbeat = nil
+        end
+        if defenseState.DesyncRender then
+            defenseState.DesyncRender:Disconnect()
+            defenseState.DesyncRender = nil
+        end
+
+        defenseState.DesyncCharacter = nil
+        defenseState.DesyncRoot = nil
+        defenseState.DesyncRealCFrame = nil
+        defenseState.DesyncLinearVelocity = nil
+        defenseState.DesyncAngularVelocity = nil
+        defenseState.DesyncSpoofed = false
+    end
+
+    local function startExecutorDesync()
+        stopExecutorDesync()
+        if not Config.DesyncAntiAimEnabled then return end
+
+        -- Heartbeat is intentionally used for the spoof phase while RenderStepped
+        -- restores the local visible position before the next frame is presented.
+        -- Whether the server/other clients observe the spoof depends on the current
+        -- Roblox replication path and executor environment.
+        defenseState.DesyncHeartbeat = RunService.Heartbeat:Connect(function()
+            if not Running or not Config.DesyncAntiAimEnabled then return end
+
+            local character = LocalPlayer.Character
+            local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+            local root = character and character:FindFirstChild("HumanoidRootPart")
+
+            if not humanoid or humanoid.Health <= 0 or not root or root.Anchored then
+                return
+            end
+
+            if defenseState.DesyncSpoofed then
+                restoreDesyncRoot()
+            end
+
+            defenseState.DesyncCharacter = character
+            defenseState.DesyncRoot = root
+            defenseState.DesyncRealCFrame = root.CFrame
+            defenseState.DesyncLinearVelocity = root.AssemblyLinearVelocity
+            defenseState.DesyncAngularVelocity = root.AssemblyAngularVelocity
+
+            -- Keep X/Z and rotation correlated with the visible character but move
+            -- the replicated physics root far below the playable map.
+            local real = defenseState.DesyncRealCFrame
+            local position = real.Position
+            local rotation = real - real.Position
+            local spoof = CFrame.new(position.X, -10000, position.Z) * rotation
+            UIControls.DesyncSpoofCFrame = spoof
+
+            pcall(function()
+                root.CFrame = spoof
+                root.AssemblyLinearVelocity = Vector3.zero
+                root.AssemblyAngularVelocity = Vector3.zero
+                defenseState.DesyncSpoofed = true
+            end)
+        end)
+
+        defenseState.DesyncRender = RunService.RenderStepped:Connect(function()
+            if not Running or not Config.DesyncAntiAimEnabled then
+                restoreDesyncRoot()
+                return
+            end
+
+            if defenseState.DesyncCharacter ~= LocalPlayer.Character then
+                restoreDesyncRoot()
+                defenseState.DesyncCharacter = nil
+                defenseState.DesyncRoot = nil
+                return
+            end
+
+            restoreDesyncRoot()
+        end)
+
+        if UIControls.DefenseStatus then
+            UIControls.DefenseStatus.Text = "Executor Desync enabled • experimental replication timing"
+        end
+    end
+
+    local function setDesyncAntiAim(value)
+        value = value and true or false
+        Config.DesyncAntiAimEnabled = value
+
+        if value then
+            startExecutorDesync()
+        else
+            stopExecutorDesync()
+        end
+
+        if UIControls.DefenseStatus then
+            if value then
+                UIControls.DefenseStatus.Text = "Executor Desync enabled • experimental replication timing"
+            else
+                UIControls.DefenseStatus.Text = Config.AntiFlingEnabled and "Anti Fling enabled" or "Executor Desync disabled"
+            end
+        end
+
+        return true
+    end
+
     UIControls.AntiFlingSwitch = CreateSwitch(
-        card,
-        UDim2.new(1, -14, 0, 22),
+        antiFlingCard,
+        UDim2.new(1, -14, 0, 21),
         Config.AntiFlingEnabled,
         function(value)
             Config.AntiFlingEnabled = value
@@ -1493,14 +1673,46 @@ do
         end
     )
 
+    UIControls.DesyncAntiAimSwitch = CreateSwitch(
+        antiAimCard,
+        UDim2.new(1, -14, 0, 21),
+        Config.DesyncAntiAimEnabled,
+        function(value)
+            setDesyncAntiAim(value)
+        end
+    )
+
     UIControls.SetAntiFling = function(value)
         value = value and true or false
         Config.AntiFlingEnabled = value
         if UIControls.AntiFlingSwitch then
-            UIControls.AntiFlingSwitch:Set(value, false)
+            UIControls.AntiFlingSwitch:SetInstant(value, false)
         end
         if value then startAntiFling() else stopAntiFling() end
     end
+
+    UIControls.SetDesyncAntiAim = function(value)
+        value = value and true or false
+        if UIControls.DesyncAntiAimSwitch then
+            UIControls.DesyncAntiAimSwitch:SetInstant(value, false)
+        end
+        return setDesyncAntiAim(value)
+    end
+
+    Connect(LocalPlayer.CharacterAdded, function()
+        if not Config.DesyncAntiAimEnabled then return end
+        task.delay(0.5, function()
+            if Running and Config.DesyncAntiAimEnabled then
+                startExecutorDesync()
+            end
+        end)
+    end)
+
+    Connect(LocalPlayer.CharacterRemoving, function()
+        restoreDesyncRoot()
+        defenseState.DesyncCharacter = nil
+        defenseState.DesyncRoot = nil
+    end)
 end
 
 
@@ -1732,56 +1944,6 @@ UIControls.SetupCombatPage = function()
 
     UIControls.FlingSheriffButton = makeUniversalButton("Fling Sheriff", Color3.fromRGB(38, 61, 91), function()
         if UIControls.FlingRole then UIControls.FlingRole("Sheriff") end
-    end)
-
-    local queryCard = New("Frame", {
-        Size = UDim2.new(1, -3, 0, 78),
-        BackgroundColor3 = Config.Panel2,
-        BackgroundTransparency = 0.05,
-        BorderSizePixel = 0,
-        ZIndex = 107,
-    })
-    queryCard.Parent = universalScroll
-    Corner(queryCard, 11)
-    Stroke(queryCard, Config.Border, 0.10, 1)
-
-    local queryBox = New("TextBox", {
-        Position = UDim2.fromOffset(8, 8),
-        Size = UDim2.new(1, -16, 0, 28),
-        BackgroundColor3 = Color3.fromRGB(27, 34, 46),
-        BackgroundTransparency = 0.04,
-        BorderSizePixel = 0,
-        ClearTextOnFocus = false,
-        PlaceholderText = "Username or display name",
-        PlaceholderColor3 = Config.Muted,
-        Text = "",
-        TextColor3 = Config.Text,
-        TextSize = 9,
-        Font = Enum.Font.Gotham,
-        TextXAlignment = Enum.TextXAlignment.Left,
-        ZIndex = 108,
-    })
-    queryBox.Parent = queryCard
-    Corner(queryBox, 9)
-
-    local flingByName = New("TextButton", {
-        Position = UDim2.fromOffset(8, 42),
-        Size = UDim2.new(1, -16, 0, 28),
-        BackgroundColor3 = Config.Water,
-        BackgroundTransparency = 0.14,
-        BorderSizePixel = 0,
-        Text = "Fling by nickname",
-        TextColor3 = Config.Text,
-        TextSize = 9,
-        Font = Enum.Font.GothamSemibold,
-        AutoButtonColor = false,
-        ZIndex = 108,
-    })
-    flingByName.Parent = queryCard
-    Corner(flingByName, 9)
-    Connect(flingByName.MouseButton1Click, function()
-        PlayClickSound()
-        if UIControls.FlingPlayerByQuery then UIControls.FlingPlayerByQuery(queryBox.Text) end
     end)
 
     local selector = New("TextButton", {
@@ -2041,9 +2203,11 @@ end
 
 local GameSection, GameHeader, GameArrow, GameBody = MakeSection(VisualStack, "Game ESP", 1)
 local MenuSection, MenuHeader, MenuArrow, MenuBody = MakeSection(VisualStack, "Menu", 2)
+UIControls.MyESPSection, UIControls.MyESPHeader, UIControls.MyESPArrow, UIControls.MyESPBody = MakeSection(VisualStack, "MyESP", 3)
 
 local GameExpanded = false
 local MenuExpanded = false
+UIControls.MyESPExpanded = false
 
 local function SetGameExpanded(value)
     GameExpanded = value
@@ -2065,16 +2229,45 @@ local function SetMenuExpanded(value)
     })
 end
 
+UIControls.SetMyESPExpanded = function(value)
+    UIControls.MyESPExpanded = value and true or false
+    Tween(UIControls.MyESPSection, 0.22, {
+        Size = UDim2.new(1, 0, 0, UIControls.MyESPExpanded and 193 or 49)
+    })
+    Tween(UIControls.MyESPBody, 0.22, {
+        Size = UDim2.new(1, 0, 0, UIControls.MyESPExpanded and 136 or 0)
+    })
+    Tween(UIControls.MyESPArrow, 0.22, {
+        Rotation = UIControls.MyESPExpanded and 90 or 0,
+        TextColor3 = UIControls.MyESPExpanded and Config.WaterBright or Config.Muted,
+    })
+end
+
 Connect(GameHeader.MouseButton1Click, function()
     PlayClickSound()
-    if not GameExpanded and MenuExpanded then SetMenuExpanded(false) end
+    if not GameExpanded then
+        if MenuExpanded then SetMenuExpanded(false) end
+        if UIControls.MyESPExpanded then UIControls.SetMyESPExpanded(false) end
+    end
     SetGameExpanded(not GameExpanded)
 end)
 
 Connect(MenuHeader.MouseButton1Click, function()
     PlayClickSound()
-    if not MenuExpanded and GameExpanded then SetGameExpanded(false) end
+    if not MenuExpanded then
+        if GameExpanded then SetGameExpanded(false) end
+        if UIControls.MyESPExpanded then UIControls.SetMyESPExpanded(false) end
+    end
     SetMenuExpanded(not MenuExpanded)
+end)
+
+Connect(UIControls.MyESPHeader.MouseButton1Click, function()
+    PlayClickSound()
+    if not UIControls.MyESPExpanded then
+        if GameExpanded then SetGameExpanded(false) end
+        if MenuExpanded then SetMenuExpanded(false) end
+    end
+    UIControls.SetMyESPExpanded(not UIControls.MyESPExpanded)
 end)
 
 --// ============================================================
@@ -2215,6 +2408,262 @@ UIControls.WatermarkSwitch = CreateSwitch(WatermarkRow, UDim2.new(1, -9, 0.5, 0)
     Config.Watermark = value
     if SetWatermarkEnabled then SetWatermarkEnabled(value) end
 end)
+
+--// ============================================================
+--// MY ESP
+--// ============================================================
+
+UIControls.SetupMyESPSection = function()
+    local body = UIControls.MyESPBody
+    if not body then return end
+
+    local roleRow = New("Frame", {
+        Position = UDim2.fromOffset(8, 0),
+        Size = UDim2.new(1, -16, 0, 44),
+        BackgroundColor3 = Config.Panel3,
+        BackgroundTransparency = 0.04,
+        BorderSizePixel = 0,
+        ZIndex = 109,
+    })
+    roleRow.Parent = body
+    Corner(roleRow, 11)
+
+    local roleTitle = New("TextLabel", {
+        Position = UDim2.fromOffset(13, 0),
+        Size = UDim2.new(1, -80, 1, 0),
+        BackgroundTransparency = 1,
+        Text = "My Role ESP",
+        TextColor3 = Config.Text,
+        TextSize = 10,
+        Font = Enum.Font.GothamSemibold,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        ZIndex = 110,
+    })
+    roleTitle.Parent = roleRow
+
+    UIControls.MyRoleESPSwitch = CreateSwitch(
+        roleRow,
+        UDim2.new(1, -9, 0.5, 0),
+        Config.MyRoleESP,
+        function(value)
+            Config.MyRoleESP = value
+        end
+    )
+
+    local hitboxRow = New("Frame", {
+        Position = UDim2.fromOffset(8, 52),
+        Size = UDim2.new(1, -16, 0, 44),
+        BackgroundColor3 = Config.Panel3,
+        BackgroundTransparency = 0.04,
+        BorderSizePixel = 0,
+        ZIndex = 109,
+    })
+    hitboxRow.Parent = body
+    Corner(hitboxRow, 11)
+
+    local hitboxTitle = New("TextLabel", {
+        Position = UDim2.fromOffset(13, 0),
+        Size = UDim2.new(1, -80, 1, 0),
+        BackgroundTransparency = 1,
+        Text = "Show My Hitbox",
+        TextColor3 = Config.Text,
+        TextSize = 10,
+        Font = Enum.Font.GothamSemibold,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        ZIndex = 110,
+    })
+    hitboxTitle.Parent = hitboxRow
+
+    UIControls.ShowMyHitboxSwitch = CreateSwitch(
+        hitboxRow,
+        UDim2.new(1, -9, 0.5, 0),
+        Config.ShowMyHitbox,
+        function(value)
+            Config.ShowMyHitbox = value
+        end
+    )
+
+    local positionLabel = New("TextLabel", {
+        Position = UDim2.fromOffset(10, 104),
+        Size = UDim2.new(1, -20, 0, 30),
+        BackgroundTransparency = 1,
+        Text = "Hitbox position: unavailable",
+        TextColor3 = Config.Muted,
+        TextSize = 8,
+        Font = Enum.Font.Gotham,
+        TextWrapped = true,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        TextYAlignment = Enum.TextYAlignment.Top,
+        ZIndex = 109,
+    })
+    positionLabel.Parent = body
+    UIControls.MyHitboxPositionLabel = positionLabel
+
+    local function destroyMarker()
+        if UIControls.MyHitboxMarker then
+            pcall(function() UIControls.MyHitboxMarker:Destroy() end)
+            UIControls.MyHitboxMarker = nil
+        end
+        if UIControls.MyHitboxMarkerHighlight then
+            pcall(function() UIControls.MyHitboxMarkerHighlight:Destroy() end)
+            UIControls.MyHitboxMarkerHighlight = nil
+        end
+        if UIControls.MyHitboxMarkerBillboard then
+            pcall(function() UIControls.MyHitboxMarkerBillboard:Destroy() end)
+            UIControls.MyHitboxMarkerBillboard = nil
+        end
+    end
+
+    local function ensureMarker()
+        local marker = UIControls.MyHitboxMarker
+        if marker and marker.Parent then
+            return marker
+        end
+
+        destroyMarker()
+
+        marker = New("Part", {
+            Name = "VAFLEX_MY_HITBOX_DEBUG",
+            Anchored = true,
+            CanCollide = false,
+            CanTouch = false,
+            CanQuery = false,
+            CastShadow = false,
+            Material = Enum.Material.Neon,
+            Color = Config.WaterBright,
+            Transparency = 0.72,
+            Size = Vector3.new(2, 2, 1),
+        })
+        marker.Parent = workspace
+        UIControls.MyHitboxMarker = marker
+
+        local markerHighlight = New("Highlight", {
+            Name = "VAFLEX_MY_HITBOX_HIGHLIGHT",
+            Adornee = marker,
+            DepthMode = Enum.HighlightDepthMode.AlwaysOnTop,
+            FillColor = Config.WaterBright,
+            OutlineColor = Config.WaterWhite,
+            FillTransparency = 0.68,
+            OutlineTransparency = 0,
+            Enabled = true,
+        })
+        markerHighlight.Parent = marker
+        UIControls.MyHitboxMarkerHighlight = markerHighlight
+
+        local billboard = New("BillboardGui", {
+            Name = "VAFLEX_MY_HITBOX_LABEL",
+            Adornee = marker,
+            Size = UDim2.fromOffset(170, 42),
+            StudsOffset = Vector3.new(0, 2.1, 0),
+            AlwaysOnTop = true,
+            LightInfluence = 0,
+        })
+        billboard.Parent = marker
+        UIControls.MyHitboxMarkerBillboard = billboard
+
+        local label = New("TextLabel", {
+            Size = UDim2.fromScale(1, 1),
+            BackgroundTransparency = 1,
+            Text = "MY HITBOX",
+            TextColor3 = Config.WaterWhite,
+            TextSize = 11,
+            Font = Enum.Font.GothamBold,
+            TextStrokeColor3 = Color3.fromRGB(5, 8, 12),
+            TextStrokeTransparency = 0.2,
+            TextWrapped = true,
+        })
+        label.Parent = billboard
+        UIControls.MyHitboxMarkerText = label
+
+        return marker
+    end
+
+    UIControls.DestroyMyHitboxESP = function()
+        destroyMarker()
+        if UIControls.MyHitboxPositionLabel then
+            UIControls.MyHitboxPositionLabel.Text = "Hitbox position: unavailable"
+        end
+    end
+
+    Connect(RunService.Heartbeat, function()
+        if not Running then return end
+
+        local character = LocalPlayer.Character
+        local root = character and character:FindFirstChild("HumanoidRootPart")
+
+        if not root then
+            if UIControls.MyHitboxPositionLabel then
+                UIControls.MyHitboxPositionLabel.Text = "Hitbox position: unavailable"
+            end
+            if UIControls.MyHitboxMarker then
+                UIControls.MyHitboxMarker.Transparency = 1
+                if UIControls.MyHitboxMarkerHighlight then
+                    UIControls.MyHitboxMarkerHighlight.Enabled = false
+                end
+                if UIControls.MyHitboxMarkerBillboard then
+                    UIControls.MyHitboxMarkerBillboard.Enabled = false
+                end
+            end
+            return
+        end
+
+        local targetCFrame
+        local sourceText
+
+        if Config.DesyncAntiAimEnabled and UIControls.DesyncSpoofCFrame then
+            targetCFrame = UIControls.DesyncSpoofCFrame
+            sourceText = "desync target"
+        else
+            targetCFrame = root.CFrame
+            sourceText = "visible root"
+        end
+
+        local position = targetCFrame.Position
+
+        if UIControls.MyHitboxPositionLabel then
+            UIControls.MyHitboxPositionLabel.Text = string.format(
+                "Hitbox position: %.1f, %.1f, %.1f  •  %s",
+                position.X,
+                position.Y,
+                position.Z,
+                sourceText
+            )
+        end
+
+        if not Config.ShowMyHitbox then
+            if UIControls.MyHitboxMarker then
+                UIControls.MyHitboxMarker.Transparency = 1
+            end
+            if UIControls.MyHitboxMarkerHighlight then
+                UIControls.MyHitboxMarkerHighlight.Enabled = false
+            end
+            if UIControls.MyHitboxMarkerBillboard then
+                UIControls.MyHitboxMarkerBillboard.Enabled = false
+            end
+            return
+        end
+
+        local marker = ensureMarker()
+        marker.CFrame = targetCFrame
+        marker.Size = root.Size
+        marker.Transparency = 0.72
+
+        if UIControls.MyHitboxMarkerHighlight then
+            UIControls.MyHitboxMarkerHighlight.Enabled = true
+        end
+        if UIControls.MyHitboxMarkerBillboard then
+            UIControls.MyHitboxMarkerBillboard.Enabled = true
+        end
+        if UIControls.MyHitboxMarkerText then
+            UIControls.MyHitboxMarkerText.Text = string.format(
+                "MY HITBOX\nY %.1f",
+                position.Y
+            )
+        end
+    end)
+end
+
+UIControls.SetupMyESPSection()
 
 --// ============================================================
 --// ROLE SETTINGS POPUP
@@ -4423,6 +4872,8 @@ SetupMovementPage()
 do
     local DefaultConfigSnapshot = {
         RoleESP = true,
+        MyRoleESP = true,
+        ShowMyHitbox = false,
         GunESP = true,
         ShowUsernames = true,
         ShowDistance = true,
@@ -4450,12 +4901,15 @@ do
         CoinFarmEnabled = false,
         CoinFarmSpeed = 22,
         AntiFlingEnabled = false,
+        DesyncAntiAimEnabled = false,
         FunctionsHUDEnabled = false,
     }
 
     local function SnapshotCurrentConfig()
         return {
             RoleESP = Config.RoleESP,
+            MyRoleESP = Config.MyRoleESP,
+            ShowMyHitbox = Config.ShowMyHitbox,
             GunESP = Config.GunESP,
             ShowUsernames = Config.RoleOptions.ShowUsernames,
             ShowDistance = Config.RoleOptions.ShowDistance,
@@ -4483,6 +4937,7 @@ do
             CoinFarmEnabled = Config.CoinFarmEnabled,
             CoinFarmSpeed = Config.CoinFarmSpeed,
             AntiFlingEnabled = Config.AntiFlingEnabled,
+            DesyncAntiAimEnabled = Config.DesyncAntiAimEnabled,
             FunctionsHUDEnabled = Config.FunctionsHUDEnabled,
         }
     end
@@ -4491,6 +4946,8 @@ do
         if not snapshot then return end
 
         Config.RoleESP = snapshot.RoleESP
+        Config.MyRoleESP = snapshot.MyRoleESP ~= false
+        Config.ShowMyHitbox = snapshot.ShowMyHitbox == true
         Config.GunESP = snapshot.GunESP
         Config.RoleOptions.ShowUsernames = snapshot.ShowUsernames
         Config.RoleOptions.ShowDistance = snapshot.ShowDistance
@@ -4519,9 +4976,12 @@ do
         Config.CoinFarmEnabled = snapshot.CoinFarmEnabled == true
         Config.CoinFarmSpeed = math.clamp(snapshot.CoinFarmSpeed or 22, 1, 100)
         Config.AntiFlingEnabled = snapshot.AntiFlingEnabled == true
+        Config.DesyncAntiAimEnabled = snapshot.DesyncAntiAimEnabled == true
         Config.FunctionsHUDEnabled = snapshot.FunctionsHUDEnabled == true
 
         UIControls.RoleSwitch:SetInstant(Config.RoleESP, false)
+        if UIControls.MyRoleESPSwitch then UIControls.MyRoleESPSwitch:SetInstant(Config.MyRoleESP, false) end
+        if UIControls.ShowMyHitboxSwitch then UIControls.ShowMyHitboxSwitch:SetInstant(Config.ShowMyHitbox, false) end
         UIControls.GunSwitch:SetInstant(Config.GunESP, false)
         UIControls.WatermarkSwitch:SetInstant(Config.Watermark, false)
         UIControls.RoleNames:SetInstant(Config.RoleOptions.ShowUsernames, false)
@@ -4544,6 +5004,7 @@ do
         if UIControls.CoinFarmSwitch then UIControls.CoinFarmSwitch:SetInstant(Config.CoinFarmEnabled, false) end
         if UIControls.ApplyCoinFarmState then UIControls.ApplyCoinFarmState(Config.CoinFarmEnabled) end
         if UIControls.SetAntiFling then UIControls.SetAntiFling(Config.AntiFlingEnabled) end
+        if UIControls.SetDesyncAntiAim then UIControls.SetDesyncAntiAim(Config.DesyncAntiAimEnabled) end
         if UIControls.FunctionsHUDSwitch then UIControls.FunctionsHUDSwitch:SetInstant(Config.FunctionsHUDEnabled, false) end
         if UIControls.SetWalkSpeedValue then UIControls.SetWalkSpeedValue(Config.WalkSpeedValue) end
         if UIControls.SetLongJumpSpeed then UIControls.SetLongJumpSpeed(Config.LongJumpSpeed) end
@@ -5099,6 +5560,7 @@ do
         if Config.NoclipEnabled then table.insert(names, "Noclip") end
         if Config.CoinFarmEnabled then table.insert(names, "Coin Farm  " .. tostring(Config.CoinFarmSpeed)) end
         if Config.AntiFlingEnabled then table.insert(names, "Anti Fling") end
+        if Config.DesyncAntiAimEnabled then table.insert(names, "Desync Anti-Aim") end
         return names
     end
 
@@ -6176,91 +6638,6 @@ UIControls.FlingRole = function(roleName)
     end)
 end
 
-local function FindPlayerByQuery(query)
-    query = tostring(query or ""):match("^%s*(.-)%s*$")
-    if query == "" then return nil end
-
-    local lowered = string.lower(query)
-    local exact = nil
-    local prefix = nil
-
-    for _, player in ipairs(Players:GetPlayers()) do
-        if player ~= LocalPlayer then
-            local username = string.lower(player.Name)
-            local display = string.lower(player.DisplayName or player.Name)
-            if username == lowered or display == lowered then
-                exact = player
-                break
-            end
-            if not prefix and (string.sub(username, 1, #lowered) == lowered or string.sub(display, 1, #lowered) == lowered) then
-                prefix = player
-            end
-        end
-    end
-
-    return exact or prefix
-end
-
-UIControls.FlingPlayer = function(target)
-    if UIControls.FlingBusy then
-        if UIControls.CombatStatus then UIControls.CombatStatus.Text = "Fling is already running" end
-        return
-    end
-
-    if Config.CoinFarmEnabled or Config.FlyEnabled then
-        if UIControls.CombatStatus then UIControls.CombatStatus.Text = "Turn off Auto Coin Farm / Fly before Fling" end
-        return
-    end
-
-    if not target or target == LocalPlayer or target.Parent ~= Players then
-        if UIControls.CombatStatus then UIControls.CombatStatus.Text = "Select a valid player first" end
-        return
-    end
-
-    local character = target.Character
-    local humanoid = character and character:FindFirstChildOfClass("Humanoid")
-    local root = character and character:FindFirstChild("HumanoidRootPart")
-    if not humanoid or humanoid.Health <= 0 or not root or root.Anchored then
-        if UIControls.CombatStatus then UIControls.CombatStatus.Text = "Selected player is dead or unavailable" end
-        return
-    end
-
-    UIControls.FlingBusy = true
-    UIControls.FlingGeneration = UIControls.FlingGeneration + 1
-    local generation = UIControls.FlingGeneration
-
-    if UIControls.CombatStatus then
-        UIControls.CombatStatus.Text = "Fling player: " .. target.DisplayName
-    end
-
-    task.spawn(function()
-        local ok, err = RunYARHMFling(target, generation, "Player")
-        if generation == UIControls.FlingGeneration then
-            UIControls.FlingBusy = false
-            if UIControls.CombatStatus then
-                if ok then
-                    UIControls.CombatStatus.Text = "Fling finished • returned"
-                else
-                    UIControls.CombatStatus.Text = "Fling stopped: " .. tostring(err or "target unavailable")
-                end
-            end
-        end
-    end)
-end
-
-UIControls.FlingPlayerByQuery = function(query)
-    local target = FindPlayerByQuery(query)
-    if not target then
-        if UIControls.CombatStatus then UIControls.CombatStatus.Text = "Player not found" end
-        return
-    end
-
-    UIControls.SelectedFlingPlayer = target
-    if UIControls.UniversalPlayerSelector then
-        UIControls.UniversalPlayerSelector.Text = "Selected player: " .. target.DisplayName .. "  ▼"
-    end
-    UIControls.FlingPlayer(target)
-end
 
 --// ============================================================
 --// ROLE ESP
@@ -6605,6 +6982,10 @@ Connect(RunService.Heartbeat, function(delta)
             local distance = (root.Position - localRoot.Position).Magnitude
             local enabled = Config.RoleESP
                 and (player == LocalPlayer or distance <= Config.MaxDistance)
+
+            if player == LocalPlayer and not Config.MyRoleESP then
+                enabled = false
+            end
 
             data.Highlight.Enabled = enabled
 
@@ -7020,11 +7401,19 @@ end
 UIControls.CrashVaflex = function()
     if not Running then return end
 
+    if Config.DesyncAntiAimEnabled and UIControls.SetDesyncAntiAim then
+        pcall(function() UIControls.SetDesyncAntiAim(false) end)
+    end
+
     Running = false
     TransitionBusy = true
 
     if UIControls.RestoreMovement then
         pcall(UIControls.RestoreMovement)
+    end
+
+    if UIControls.DestroyMyHitboxESP then
+        pcall(UIControls.DestroyMyHitboxESP)
     end
 
     UIControls.PlayCrashWaterBall(function()
