@@ -1600,6 +1600,16 @@ do
         defenseState.DesyncStep = stepSignal:Connect(function()
             if not Running or not Config.DesyncAntiAimEnabled then return end
 
+            -- Fling temporarily owns the local HumanoidRootPart. If Anti Aim keeps
+            -- restoring its pre-fling snapshot here, the fling return teleport gets
+            -- overwritten and the local player can remain at the target.
+            if UIControls.DesyncSuspended or UIControls.FlingBusy then
+                if defenseState.DesyncSpoofed then
+                    restoreAntiAim()
+                end
+                return
+            end
+
             local character = LocalPlayer.Character
             local humanoid = character and character:FindFirstChildOfClass("Humanoid")
             local root = character and character:FindFirstChild("HumanoidRootPart")
@@ -1682,6 +1692,11 @@ do
             Enum.RenderPriority.Camera.Value - 1,
             function()
                 if not Running or not Config.DesyncAntiAimEnabled then
+                    restoreAntiAim()
+                    return
+                end
+
+                if UIControls.DesyncSuspended or UIControls.FlingBusy then
                     restoreAntiAim()
                     return
                 end
@@ -1775,6 +1790,18 @@ do
             UIControls.DesyncAntiAimSwitch:SetInstant(value, false)
         end
         return setAntiAim(value)
+    end
+
+    -- Temporary suspension does NOT toggle the Anti Aim switch. It only gives
+    -- short-lived systems such as Fling exclusive ownership of HRP/CFrame.
+    UIControls.SuspendDesyncAntiAim = function(value)
+        UIControls.DesyncSuspended = value and true or false
+
+        if UIControls.DesyncSuspended then
+            -- Flush any spoof that was already active before Fling starts so
+            -- returnPivot is captured from the real local position.
+            restoreAntiAim()
+        end
     end
 
     Connect(LocalPlayer.CharacterAdded, function()
@@ -6718,12 +6745,25 @@ local function RunYARHMFling(targetPlayer, generation, roleName)
         end
 
         if root and root.Parent and LocalPlayer.Character == character then
+            local finalReturnPivot = returnPivot * CFrame.new(0, 0.5, 0)
+
             pcall(function()
                 root.AssemblyLinearVelocity = Vector3.zero
                 root.AssemblyAngularVelocity = Vector3.zero
-                character:PivotTo(returnPivot * CFrame.new(0, 0.5, 0))
+                character:PivotTo(finalReturnPivot)
                 humanoid:ChangeState(Enum.HumanoidStateType.GettingUp)
             end)
+
+            -- Some fling movers/physics ownership changes settle one task step
+            -- later. Re-assert the return once while Anti Aim is still suspended.
+            task.wait()
+            if root.Parent and LocalPlayer.Character == character then
+                pcall(function()
+                    root.AssemblyLinearVelocity = Vector3.zero
+                    root.AssemblyAngularVelocity = Vector3.zero
+                    character:PivotTo(finalReturnPivot)
+                end)
+            end
         end
     end
 
@@ -6876,6 +6916,16 @@ UIControls.FlingRole = function(roleName)
     end
 
     UIControls.FlingBusy = true
+
+    -- Anti Aim and Fling both manipulate HumanoidRootPart. Suspend only the
+    -- spoofing part for the short fling window; the Anti Aim setting stays ON
+    -- and automatically resumes after the return teleport finishes.
+    if UIControls.SuspendDesyncAntiAim then
+        pcall(function()
+            UIControls.SuspendDesyncAntiAim(true)
+        end)
+    end
+
     UIControls.FlingGeneration = UIControls.FlingGeneration + 1
     local generation = UIControls.FlingGeneration
 
@@ -6886,7 +6936,16 @@ UIControls.FlingRole = function(roleName)
     task.spawn(function()
         local ok, err = RunYARHMFling(target, generation, roleName)
         if generation == UIControls.FlingGeneration then
+            -- RunYARHMFling has already restored returnPivot at this point.
+            -- Release Fling ownership first, then allow Anti Aim to resume from
+            -- the returned position instead of an old target-side snapshot.
             UIControls.FlingBusy = false
+            if UIControls.SuspendDesyncAntiAim then
+                pcall(function()
+                    UIControls.SuspendDesyncAntiAim(false)
+                end)
+            end
+
             if UIControls.CombatStatus then
                 if ok then
                     UIControls.CombatStatus.Text = "Fling finished • returned"
