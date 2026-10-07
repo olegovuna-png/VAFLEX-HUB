@@ -1506,27 +1506,13 @@ do
         if not defenseState.DesyncSpoofed then return end
 
         local root = defenseState.DesyncRoot
-        local humanoid = defenseState.DesyncHumanoid
-
-        if root and root.Parent then
+        if root and root.Parent and defenseState.DesyncRealCFrame then
             pcall(function()
-                if defenseState.DesyncRealCFrame then
-                    root.CFrame = defenseState.DesyncRealCFrame
-                end
-                if defenseState.DesyncRealVelocity then
-                    root.AssemblyLinearVelocity = defenseState.DesyncRealVelocity
-                    root.Velocity = defenseState.DesyncRealVelocity
-                end
-                if defenseState.DesyncRealAngularVelocity then
-                    root.AssemblyAngularVelocity = defenseState.DesyncRealAngularVelocity
-                    root.RotVelocity = defenseState.DesyncRealAngularVelocity
-                end
-            end)
-        end
-
-        if humanoid and humanoid.Parent and defenseState.DesyncRealHumanoidState then
-            pcall(function()
-                humanoid:ChangeState(defenseState.DesyncRealHumanoidState)
+                -- Restore only the temporary positional spoof.
+                -- Do not touch velocity, angular velocity, or Humanoid state:
+                -- movement features such as Spin, LongJump, Strafe and JumpBoost
+                -- must keep ownership of those values.
+                root.CFrame = defenseState.DesyncRealCFrame
             end)
         end
 
@@ -1609,21 +1595,17 @@ do
 
             local realCFrame = root.CFrame
             local realVelocity = root.AssemblyLinearVelocity
-            local realAngular = root.AssemblyAngularVelocity
 
             defenseState.DesyncCharacter = character
             defenseState.DesyncRoot = root
             defenseState.DesyncHumanoid = humanoid
             defenseState.DesyncRealCFrame = realCFrame
-            defenseState.DesyncRealVelocity = realVelocity
-            defenseState.DesyncRealAngularVelocity = realAngular
 
-            local okState, stateNow = pcall(function()
-                return humanoid:GetState()
-            end)
-            defenseState.DesyncRealHumanoidState = okState and stateNow or nil
-
-            local spoofVelocity, baseOffset = phaseData(os.clock())
+            -- Keep Anti Aim compatible with movement controllers.
+            -- We still use the phase offset, but we do not replace the player's
+            -- real velocity or Humanoid state.
+            local _, baseOffset = phaseData(os.clock())
+            local spoofVelocity = realVelocity
 
             -- When standing still, position samples are the strongest fallback in
             -- SYDJA. Add a small packet-sized XZ displacement so its measured
@@ -1643,18 +1625,9 @@ do
             UIControls.DesyncSpoofCFrame = spoofCFrame
 
             pcall(function()
-                -- Small CFrame displacement + accepted (<90 XZ) velocity gives the
-                -- predictor both a fake reported velocity and fake measured motion.
+                -- Position-only spoof. This avoids fighting the Movement page
+                -- over velocity, rotation physics, and Humanoid states.
                 root.CFrame = spoofCFrame
-                root.AssemblyLinearVelocity = spoofVelocity
-                root.Velocity = spoofVelocity
-                root.AssemblyAngularVelocity = Vector3.zero
-                root.RotVelocity = Vector3.zero
-
-                -- Fresh Jumping state + accepted vertical velocity attacks the
-                -- predictor's strongest vertical branch.
-                humanoid:ChangeState(Enum.HumanoidStateType.Jumping)
-
                 defenseState.DesyncSpoofed = true
             end)
         end)
@@ -2553,7 +2526,7 @@ UIControls.SetupMyESPSection = function()
         Position = UDim2.fromOffset(10, 103),
         Size = UDim2.new(1, -20, 0, 34),
         BackgroundTransparency = 1,
-        Text = "Ping estimate: unavailable",
+        Text = "PING -- ms • VIEW -- ms",
         TextColor3 = Config.Muted,
         TextSize = 7,
         Font = Enum.Font.Gotham,
@@ -2798,7 +2771,7 @@ UIControls.SetupMyESPSection = function()
         clearHistory()
 
         if UIControls.MyHitboxPositionLabel then
-            UIControls.MyHitboxPositionLabel.Text = "Ping estimate: unavailable"
+            UIControls.MyHitboxPositionLabel.Text = "PING -- ms • VIEW -- ms"
         end
     end
 
@@ -2823,7 +2796,7 @@ UIControls.SetupMyESPSection = function()
             setGhostVisible("MyPingGhost", false)
 
             if UIControls.MyHitboxPositionLabel then
-                UIControls.MyHitboxPositionLabel.Text = "Ping estimate: unavailable"
+                UIControls.MyHitboxPositionLabel.Text = "PING -- ms • VIEW -- ms"
             end
             return
         end
@@ -2839,8 +2812,7 @@ UIControls.SetupMyESPSection = function()
 
         if UIControls.MyHitboxPositionLabel then
             UIControls.MyHitboxPositionLabel.Text = string.format(
-                "Remote est: %.1f, %.1f, %.1f • ping %.0f ms • view ~%.0f ms",
-                pingPos.X, pingPos.Y, pingPos.Z,
+                "PING %.0f ms • VIEW ~%.0f ms",
                 ping * 1000,
                 viewDelay * 1000
             )
@@ -2855,7 +2827,7 @@ UIControls.SetupMyESPSection = function()
             "MyPingGhost",
             character,
             Color3.fromRGB(255, 215, 80),
-            "REMOTE HITBOX"
+            ""
         )
 
         updateGhost(
@@ -2864,7 +2836,7 @@ UIControls.SetupMyESPSection = function()
             root,
             pingCFrame,
             string.format(
-                "REMOTE HITBOX • ping %.0f ms • view ~%.0f ms",
+                "PING %.0f ms • VIEW ~%.0f ms",
                 ping * 1000,
                 viewDelay * 1000
             )
