@@ -1181,7 +1181,7 @@ end
 local function CreateTab(name, icon)
     local Button = New("TextButton", {
         Name = name .. "Tab",
-        Size = UDim2.new(1, 0, 0, 44),
+        Size = UDim2.new(1, 0, 0, 40),
         BackgroundColor3 = Config.Panel2,
         BackgroundTransparency = 1,
         Text = "",
@@ -1193,7 +1193,7 @@ local function CreateTab(name, icon)
 
     local Icon = New("TextLabel", {
         Position = UDim2.fromOffset(8, 0),
-        Size = UDim2.fromOffset(23, 44),
+        Size = UDim2.fromOffset(23, 40),
         BackgroundTransparency = 1,
         Text = icon,
         TextColor3 = Config.Muted,
@@ -1243,6 +1243,8 @@ end
 local VisualPage = CreateTab("Visual", "◉")
 CreateTab("Movement", "↗")
 Pages["Movement"].Page.Name = "MovementPage"
+CreateTab("Combat", "⚔")
+Pages["Combat"].Page.Name = "CombatPage"
 local SettingsPage = CreateTab("Settings", "⚙")
 SettingsPage.Name = "SettingsPage"
 local ConfigsPage = CreateTab("Configs", "▣")
@@ -1277,6 +1279,7 @@ end
 
 CreatePageTitle(VisualPage, "Visual", "Visual modules")
 CreatePageTitle(Pages["Movement"].Page, "Movement", "Movement and air controls")
+CreatePageTitle(Pages["Combat"].Page, "Combat", "Role-based combat modules")
 CreatePageTitle(SettingsPage, "Settings", "VAFLEX configuration")
 CreatePageTitle(ConfigsPage, "Configs", "Save and restore VAFLEX settings")
 
@@ -1348,6 +1351,285 @@ local function CreateSwitch(parent, position, default, callback)
         end,
     }
 end
+
+
+--// ============================================================
+--// COMBAT PAGE
+--// ============================================================
+
+UIControls.SetupCombatPage = function()
+    local page = Pages["Combat"] and Pages["Combat"].Page
+    if not page then return end
+
+    local roleCard = New("Frame", {
+        Name = "CombatRoleCard",
+        Position = UDim2.fromOffset(0, 52),
+        Size = UDim2.new(1, 0, 0, 30),
+        BackgroundColor3 = Config.Panel2,
+        BackgroundTransparency = 0.05,
+        BorderSizePixel = 0,
+        ZIndex = 105,
+    })
+    roleCard.Parent = page
+    Corner(roleCard, 11)
+    Stroke(roleCard, Config.Border, 0.08, 1)
+
+    local roleLabel = New("TextLabel", {
+        Position = UDim2.fromOffset(12, 0),
+        Size = UDim2.new(1, -24, 1, 0),
+        BackgroundTransparency = 1,
+        Text = "Your role: Not in round",
+        TextColor3 = Config.Muted,
+        TextSize = 10,
+        Font = Enum.Font.GothamSemibold,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        ZIndex = 106,
+    })
+    roleLabel.Parent = roleCard
+    UIControls.CombatRoleLabel = roleLabel
+
+    local tabBar = New("Frame", {
+        Name = "CombatRoleTabs",
+        Position = UDim2.fromOffset(0, 88),
+        Size = UDim2.new(1, 0, 0, 30),
+        BackgroundTransparency = 1,
+        ZIndex = 105,
+    })
+    tabBar.Parent = page
+
+    local body = New("Frame", {
+        Name = "CombatBody",
+        Position = UDim2.fromOffset(0, 124),
+        Size = UDim2.new(1, 0, 1, -124),
+        BackgroundTransparency = 1,
+        ClipsDescendants = true,
+        ZIndex = 105,
+    })
+    body.Parent = page
+
+    UIControls.CombatSubPages = {}
+    UIControls.CombatSubButtons = {}
+    UIControls.CombatSelected = "Innocent"
+
+    local function createSubPage(name)
+        local frame = New("Frame", {
+            Name = name .. "CombatPage",
+            Size = UDim2.fromScale(1, 1),
+            BackgroundTransparency = 1,
+            Visible = false,
+            ZIndex = 106,
+        })
+        frame.Parent = body
+        UIControls.CombatSubPages[name] = frame
+        return frame
+    end
+
+    local function createTabButton(name, xScale)
+        local button = New("TextButton", {
+            Name = name .. "CombatTab",
+            Position = UDim2.new(xScale, xScale > 0 and 3 or 0, 0, 0),
+            Size = UDim2.new(1/3, -4, 1, 0),
+            BackgroundColor3 = Config.Panel2,
+            BackgroundTransparency = 1,
+            BorderSizePixel = 0,
+            Text = name,
+            TextColor3 = Config.Muted,
+            TextSize = 9,
+            Font = Enum.Font.GothamSemibold,
+            AutoButtonColor = false,
+            ZIndex = 107,
+        })
+        button.Parent = tabBar
+        Corner(button, 10)
+        UIControls.CombatSubButtons[name] = button
+        return button
+    end
+
+    local murderPage = createSubPage("Murder")
+    local sheriffPage = createSubPage("Sheriff")
+    local innocentPage = createSubPage("Innocent")
+
+    createTabButton("Murder", 0)
+    createTabButton("Sheriff", 1/3)
+    createTabButton("Innocent", 2/3)
+
+    UIControls.SelectCombatSubtab = function(name, manual)
+        if not UIControls.CombatSubPages[name] then return end
+        UIControls.CombatSelected = name
+
+        for pageName, frame in pairs(UIControls.CombatSubPages) do
+            local selected = pageName == name
+            frame.Visible = selected
+
+            local button = UIControls.CombatSubButtons[pageName]
+            if button then
+                Tween(button, 0.16, {
+                    BackgroundTransparency = selected and 0.05 or 1,
+                    TextColor3 = selected and Config.Text or Config.Muted,
+                })
+            end
+        end
+
+        if manual then
+            UIControls.CombatManualSelection = true
+        end
+    end
+
+    for name, button in pairs(UIControls.CombatSubButtons) do
+        Connect(button.MouseButton1Click, function()
+            PlayClickSound()
+            UIControls.SelectCombatSubtab(name, true)
+        end)
+    end
+
+    local function addEmptyRoleText(parent, title, subtitle)
+        local card = New("Frame", {
+            Position = UDim2.fromOffset(0, 0),
+            Size = UDim2.new(1, 0, 0, 76),
+            BackgroundColor3 = Config.Panel2,
+            BackgroundTransparency = 0.05,
+            BorderSizePixel = 0,
+            ZIndex = 106,
+        })
+        card.Parent = parent
+        Corner(card, 12)
+        Stroke(card, Config.Border, 0.10, 1)
+
+        local titleLabel = New("TextLabel", {
+            Position = UDim2.fromOffset(13, 10),
+            Size = UDim2.new(1, -26, 0, 22),
+            BackgroundTransparency = 1,
+            Text = title,
+            TextColor3 = Config.Text,
+            TextSize = 11,
+            Font = Enum.Font.GothamBold,
+            TextXAlignment = Enum.TextXAlignment.Left,
+            ZIndex = 107,
+        })
+        titleLabel.Parent = card
+
+        local subLabel = New("TextLabel", {
+            Position = UDim2.fromOffset(13, 34),
+            Size = UDim2.new(1, -26, 0, 28),
+            BackgroundTransparency = 1,
+            Text = subtitle,
+            TextColor3 = Config.Muted,
+            TextSize = 8,
+            Font = Enum.Font.Gotham,
+            TextWrapped = true,
+            TextXAlignment = Enum.TextXAlignment.Left,
+            TextYAlignment = Enum.TextYAlignment.Top,
+            ZIndex = 107,
+        })
+        subLabel.Parent = card
+    end
+
+    addEmptyRoleText(murderPage, "Murder", "Murder role detected. Role-specific functions can be added here.")
+    addEmptyRoleText(sheriffPage, "Sheriff", "Sheriff / Hero role detected. Role-specific functions can be added here.")
+
+    local function makeCombatButton(parent, y, title, accent, callback)
+        local button = New("TextButton", {
+            Position = UDim2.fromOffset(0, y),
+            Size = UDim2.new(1, 0, 0, 40),
+            BackgroundColor3 = accent,
+            BackgroundTransparency = 0.18,
+            BorderSizePixel = 0,
+            Text = title,
+            TextColor3 = Config.Text,
+            TextSize = 10,
+            Font = Enum.Font.GothamSemibold,
+            AutoButtonColor = false,
+            ZIndex = 107,
+        })
+        button.Parent = parent
+        Corner(button, 11)
+        Stroke(button, Config.Border, 0.12, 1)
+
+        Connect(button.MouseButton1Click, function()
+            PlayClickSound()
+            callback()
+        end)
+
+        return button
+    end
+
+    UIControls.FlingMurderButton = makeCombatButton(
+        innocentPage,
+        0,
+        "Fling Murder",
+        Color3.fromRGB(86, 40, 48),
+        function()
+            if UIControls.FlingRole then UIControls.FlingRole("Murderer") end
+        end
+    )
+
+    UIControls.FlingSheriffButton = makeCombatButton(
+        innocentPage,
+        48,
+        "Fling Sheriff",
+        Color3.fromRGB(38, 61, 91),
+        function()
+            if UIControls.FlingRole then UIControls.FlingRole("Sheriff") end
+        end
+    )
+
+    local status = New("TextLabel", {
+        Position = UDim2.fromOffset(4, 92),
+        Size = UDim2.new(1, -8, 0, 22),
+        BackgroundTransparency = 1,
+        Text = "Innocent functions",
+        TextColor3 = Config.Muted,
+        TextSize = 8,
+        Font = Enum.Font.Gotham,
+        TextWrapped = true,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        TextYAlignment = Enum.TextYAlignment.Top,
+        ZIndex = 107,
+    })
+    status.Parent = innocentPage
+    UIControls.CombatStatus = status
+
+    UIControls.SetCombatRole = function(role)
+        role = role or "Unknown"
+        if UIControls.LastCombatRole == role then return end
+        UIControls.LastCombatRole = role
+
+        local color = Config.Unknown
+        local label = "Not in round"
+        local targetTab = nil
+
+        if role == "Murderer" then
+            color = Config.Murderer
+            label = "Murder"
+            targetTab = "Murder"
+        elseif role == "Sheriff" then
+            color = Config.Sheriff
+            label = "Sheriff"
+            targetTab = "Sheriff"
+        elseif role == "Hero" then
+            color = Config.Hero
+            label = "Hero"
+            targetTab = "Sheriff"
+        elseif role == "Innocent" then
+            color = Config.Innocent
+            label = "Innocent"
+            targetTab = "Innocent"
+        end
+
+        roleLabel.Text = "Your role: " .. label
+        roleLabel.TextColor3 = color
+
+        if targetTab then
+            UIControls.CombatManualSelection = false
+            UIControls.SelectCombatSubtab(targetTab, false)
+        end
+    end
+
+    UIControls.SelectCombatSubtab("Innocent", false)
+    UIControls.SetCombatRole("Unknown")
+end
+
+UIControls.SetupCombatPage()
 
 --// ============================================================
 --// VISUAL ACCORDION STACK
@@ -3501,7 +3783,7 @@ local function SetupMovementPage()
     )
 
     UIControls.FlySwitch = MakeMovementRow(
-        AirBody, 104, "Fly", "Fly where you are looking",
+        AirBody, 104, "Fly", "",
         Config.FlyEnabled,
         SetFlyEnabled,
         "Fly"
@@ -5187,6 +5469,9 @@ local function RefreshRemoteRoles()
     local updatedRoles = {}
 
     for playerName, data in pairs(result) do
+        local name = tostring(playerName)
+        local playerObject = Players:FindFirstChild(name)
+
         if type(data) == "table" then
             local role = NormalizeRole(
                 data.Role
@@ -5195,10 +5480,34 @@ local function RefreshRemoteRoles()
                 or data.RoundRole
             )
 
-            if role then updatedRoles[tostring(playerName)] = role end
+            -- MM2 GetPlayerData commonly keeps the previous Role after death.
+            -- Killed/Dead is therefore authoritative for whether that role is active.
+            local explicitlyDead = data.Killed == true
+                or data.Dead == true
+                or data.Alive == false
+                or data.InRound == false
+
+            local explicitlyAlive = data.Killed == false
+                or data.Dead == false
+                or data.Alive == true
+                or data.InRound == true
+
+            if playerObject then
+                if explicitlyDead then
+                    DeadPlayers[playerObject] = true
+                elseif role and explicitlyAlive then
+                    DeadPlayers[playerObject] = false
+                end
+            end
+
+            if role and not explicitlyDead then
+                updatedRoles[name] = role
+            end
         elseif type(data) == "string" then
             local role = NormalizeRole(data)
-            if role then updatedRoles[tostring(playerName)] = role end
+            if role and not (playerObject and DeadPlayers[playerObject]) then
+                updatedRoles[name] = role
+            end
         end
     end
 
@@ -5254,6 +5563,10 @@ local function HasTool(player, name)
 end
 
 local function GetRole(player)
+    if DeadPlayers[player] then
+        return "Unknown"
+    end
+
     local role = RemoteRoles[player.Name]
     if role then return role end
 
@@ -5281,6 +5594,169 @@ local function GetRoleColor(role)
     if role == "Hero" then return Config.Hero end
     if role == "Innocent" then return Config.Innocent end
     return Config.Unknown
+end
+
+
+--// ============================================================
+--// COMBAT ROLE FLING
+--// ============================================================
+
+UIControls.FlingBusy = false
+UIControls.FlingGeneration = 0
+
+UIControls.FlingRole = function(roleName)
+    if UIControls.FlingBusy then
+        if UIControls.CombatStatus then UIControls.CombatStatus.Text = "Fling is already running" end
+        return
+    end
+
+    if Config.CoinFarmEnabled or Config.FlyEnabled then
+        if UIControls.CombatStatus then UIControls.CombatStatus.Text = "Turn off Auto Coin Farm / Fly before Fling" end
+        return
+    end
+
+    RefreshRemoteRoles()
+
+    local myRole = GetRole(LocalPlayer)
+    if myRole ~= "Innocent" then
+        if UIControls.CombatStatus then
+            UIControls.CombatStatus.Text = "Fling Murder / Sheriff is available in the Innocent role"
+        end
+        return
+    end
+
+    local target = nil
+    local targetDistance = math.huge
+    local myCharacter = LocalPlayer.Character
+    local myRoot = myCharacter and myCharacter:FindFirstChild("HumanoidRootPart")
+
+    local function matchesRequestedRole(player)
+        local role = GetRole(player)
+        if role == roleName then return true end
+        return roleName == "Sheriff" and role == "Hero"
+    end
+
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player ~= LocalPlayer and matchesRequestedRole(player) then
+            local character = player.Character
+            local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+            local root = character and character:FindFirstChild("HumanoidRootPart")
+
+            if humanoid and humanoid.Health > 0 and root and not root.Anchored then
+                local distance = myRoot and (root.Position - myRoot.Position).Magnitude or 0
+                if distance < targetDistance then
+                    targetDistance = distance
+                    target = player
+                end
+            end
+        end
+    end
+
+    if not target then
+        if UIControls.CombatStatus then
+            UIControls.CombatStatus.Text = "No living " .. roleName .. " found"
+        end
+        return
+    end
+
+    UIControls.FlingBusy = true
+    UIControls.FlingGeneration = UIControls.FlingGeneration + 1
+    local generation = UIControls.FlingGeneration
+
+    task.spawn(function()
+        local character = LocalPlayer.Character
+        local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+        local root = character and character:FindFirstChild("HumanoidRootPart")
+        local targetCharacter = target.Character
+        local targetHumanoid = targetCharacter and targetCharacter:FindFirstChildOfClass("Humanoid")
+        local targetRoot = targetCharacter and targetCharacter:FindFirstChild("HumanoidRootPart")
+
+        if not character or not humanoid or humanoid.Health <= 0 or not root
+            or not targetCharacter or not targetHumanoid or targetHumanoid.Health <= 0
+            or not targetRoot or targetRoot.Anchored then
+            UIControls.FlingBusy = false
+            if UIControls.CombatStatus then UIControls.CombatStatus.Text = "Fling target is not ready" end
+            return
+        end
+
+        local returnPivot = character:GetPivot()
+        local oldAutoRotate = humanoid.AutoRotate
+        local oldPlatformStand = humanoid.PlatformStand
+        local oldLinearVelocity = root.AssemblyLinearVelocity
+        local oldAngularVelocity = root.AssemblyAngularVelocity
+
+        humanoid.AutoRotate = false
+        humanoid.PlatformStand = true
+
+        if UIControls.CombatStatus then
+            UIControls.CombatStatus.Text = "Fling " .. roleName .. ": " .. target.DisplayName
+        end
+
+        local started = os.clock()
+        local duration = 1.15
+
+        while Running
+            and generation == UIControls.FlingGeneration
+            and os.clock() - started < duration do
+
+            if LocalPlayer.Character ~= character
+                or humanoid.Health <= 0
+                or target.Character ~= targetCharacter
+                or targetHumanoid.Health <= 0
+                or not root.Parent
+                or not targetRoot.Parent
+                or targetRoot.Anchored
+                or not matchesRequestedRole(target) then
+                break
+            end
+
+            -- Keep our collision body inside the target instead of orbiting around it.
+            -- Alternating high local velocity + spin produces the contact impulse.
+            local phase = (os.clock() - started) * 58
+            local push = Vector3.new(math.cos(phase), 0.10, math.sin(phase)) * 115
+
+            pcall(function()
+                character:PivotTo(CFrame.new(targetRoot.Position) * CFrame.Angles(0, phase, 0))
+                root.AssemblyAngularVelocity = Vector3.new(0, 1750, 0)
+                root.AssemblyLinearVelocity = push
+            end)
+
+            RunService.PreSimulation:Wait()
+        end
+
+        if root and root.Parent and LocalPlayer.Character == character then
+            pcall(function()
+                root.AssemblyLinearVelocity = Vector3.zero
+                root.AssemblyAngularVelocity = Vector3.zero
+                character:PivotTo(returnPivot)
+            end)
+        end
+
+        if humanoid and humanoid.Parent and LocalPlayer.Character == character then
+            humanoid.AutoRotate = oldAutoRotate
+            humanoid.PlatformStand = oldPlatformStand
+        end
+
+        task.wait()
+
+        if root and root.Parent and LocalPlayer.Character == character then
+            root.AssemblyLinearVelocity = Vector3.new(
+                math.clamp(oldLinearVelocity.X, -35, 35),
+                math.clamp(oldLinearVelocity.Y, -35, 35),
+                math.clamp(oldLinearVelocity.Z, -35, 35)
+            )
+            root.AssemblyAngularVelocity = Vector3.new(
+                math.clamp(oldAngularVelocity.X, -8, 8),
+                math.clamp(oldAngularVelocity.Y, -8, 8),
+                math.clamp(oldAngularVelocity.Z, -8, 8)
+            )
+        end
+
+        if generation == UIControls.FlingGeneration then
+            UIControls.FlingBusy = false
+            if UIControls.CombatStatus then UIControls.CombatStatus.Text = "Fling finished • returned" end
+        end
+    end)
 end
 
 --// ============================================================
@@ -5392,7 +5868,12 @@ end
 --// ============================================================
 
 local function TrackCharacter(player, character)
-    DeadPlayers[player] = false
+    -- After a death MM2 can respawn the player in the lobby while GetPlayerData
+    -- still contains the old Sheriff/Murderer role. Keep the dead flag until
+    -- fresh role data explicitly marks the player alive/in-round again.
+    if not PlayedPlayers[player] then
+        DeadPlayers[player] = false
+    end
 
     task.defer(function()
         if not Running or not character.Parent then return end
@@ -5412,6 +5893,8 @@ local function TrackCharacter(player, character)
 
     if humanoid then
         Connect(humanoid.Died, function()
+            RemoteRoles[player.Name] = nil
+
             if PlayedPlayers[player] then
                 DeadPlayers[player] = true
             else
@@ -5623,6 +6106,10 @@ Connect(RunService.Heartbeat, function(delta)
             data.Highlight.Enabled = enabled
 
             local role = GetRole(player)
+
+            if player == LocalPlayer and UIControls.SetCombatRole then
+                UIControls.SetCombatRole(role)
+            end
 
             if role ~= "Unknown" then
                 PlayedPlayers[player] = true
