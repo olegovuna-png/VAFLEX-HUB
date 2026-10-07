@@ -1381,9 +1381,6 @@ do
         DesyncRealAngularVelocity = nil,
         DesyncRealHumanoidState = nil,
 
-        DesyncCamera = nil,
-        DesyncCameraRelative = nil,
-
         DesyncSpoofVelocity = Vector3.zero,
         DesyncSpoofCFrame = nil,
         DesyncSpoofed = false,
@@ -1533,13 +1530,6 @@ do
             end)
         end
 
-        local camera = defenseState.DesyncCamera
-        if camera and camera.Parent and defenseState.DesyncRealCFrame and defenseState.DesyncCameraRelative then
-            pcall(function()
-                camera.CFrame = defenseState.DesyncRealCFrame * defenseState.DesyncCameraRelative
-            end)
-        end
-
         defenseState.DesyncSpoofed = false
     end
 
@@ -1562,8 +1552,6 @@ do
         defenseState.DesyncRealVelocity = nil
         defenseState.DesyncRealAngularVelocity = nil
         defenseState.DesyncRealHumanoidState = nil
-        defenseState.DesyncCamera = nil
-        defenseState.DesyncCameraRelative = nil
         defenseState.DesyncSpoofVelocity = Vector3.zero
         defenseState.DesyncSpoofCFrame = nil
         defenseState.DesyncSpoofed = false
@@ -1635,15 +1623,6 @@ do
             end)
             defenseState.DesyncRealHumanoidState = okState and stateNow or nil
 
-            local camera = Workspace.CurrentCamera
-            defenseState.DesyncCamera = camera
-            defenseState.DesyncCameraRelative = nil
-            if camera then
-                pcall(function()
-                    defenseState.DesyncCameraRelative = realCFrame:ToObjectSpace(camera.CFrame)
-                end)
-            end
-
             local spoofVelocity, baseOffset = phaseData(os.clock())
 
             -- When standing still, position samples are the strongest fallback in
@@ -1680,22 +1659,38 @@ do
             end)
         end)
 
-        local restoreSignal = RunService.PreRender or RunService.RenderStepped
-        defenseState.DesyncRestore = restoreSignal:Connect(function()
-            if not Running or not Config.DesyncAntiAimEnabled then
-                restoreAntiAim()
-                return
-            end
-
-            if defenseState.DesyncCharacter ~= LocalPlayer.Character then
-                restoreAntiAim()
-                defenseState.DesyncCharacter = nil
-                defenseState.DesyncRoot = nil
-                return
-            end
-
-            restoreAntiAim()
+        local ANTI_AIM_RESTORE_BIND = "VAFLEX_AntiAimRestore"
+        pcall(function()
+            RunService:UnbindFromRenderStep(ANTI_AIM_RESTORE_BIND)
         end)
+
+        RunService:BindToRenderStep(
+            ANTI_AIM_RESTORE_BIND,
+            Enum.RenderPriority.Camera.Value - 1,
+            function()
+                if not Running or not Config.DesyncAntiAimEnabled then
+                    restoreAntiAim()
+                    return
+                end
+
+                if defenseState.DesyncCharacter ~= LocalPlayer.Character then
+                    restoreAntiAim()
+                    defenseState.DesyncCharacter = nil
+                    defenseState.DesyncRoot = nil
+                    return
+                end
+
+                restoreAntiAim()
+            end
+        )
+
+        defenseState.DesyncRestore = {
+            Disconnect = function()
+                pcall(function()
+                    RunService:UnbindFromRenderStep(ANTI_AIM_RESTORE_BIND)
+                end)
+            end
+        }
 
         if UIControls.DefenseStatus then
             UIControls.DefenseStatus.Text = "Anti Aim enabled"
@@ -2622,12 +2617,16 @@ UIControls.SetupMyESPSection = function()
 
     local function getPingEstimate(root)
         local ping = getPingSeconds()
-        local oneWay = math.clamp(ping * 0.5, 0, 0.45)
-        local targetTime = os.clock() - oneWay
+
+        -- Approximate where a remote client may still render us:
+        -- local client -> server + server -> remote client + replication/render buffer.
+        local replicationBuffer = 0.045
+        local viewDelay = math.clamp(ping + replicationBuffer, 0.050, 0.350)
+        local targetTime = os.clock() - viewDelay
         local history = UIControls.MyHitboxHistory
 
         if #history == 0 then
-            return root.CFrame, ping
+            return root.CFrame, ping, viewDelay
         end
 
         local before = history[1]
@@ -2643,7 +2642,7 @@ UIControls.SetupMyESPSection = function()
         end
 
         if before == after or after.Time <= before.Time then
-            return before.CFrame, ping
+            return before.CFrame, ping, viewDelay
         end
 
         local alpha = math.clamp(
@@ -2652,7 +2651,7 @@ UIControls.SetupMyESPSection = function()
             1
         )
 
-        return before.CFrame:Lerp(after.CFrame, alpha), ping
+        return before.CFrame:Lerp(after.CFrame, alpha), ping, viewDelay
     end
 
     local function destroyGhost(key)
@@ -2832,7 +2831,7 @@ UIControls.SetupMyESPSection = function()
         pushHistory(root)
 
         local localCFrame = root.CFrame
-        local pingCFrame, ping = getPingEstimate(root)
+        local pingCFrame, ping, viewDelay = getPingEstimate(root)
         local pingPos = pingCFrame.Position
 
         UIControls.MyEstimatedServerCFrame = pingCFrame
@@ -2840,9 +2839,10 @@ UIControls.SetupMyESPSection = function()
 
         if UIControls.MyHitboxPositionLabel then
             UIControls.MyHitboxPositionLabel.Text = string.format(
-                "Ping est: %.1f, %.1f, %.1f • %.0f ms",
+                "Remote est: %.1f, %.1f, %.1f • ping %.0f ms • view ~%.0f ms",
                 pingPos.X, pingPos.Y, pingPos.Z,
-                ping * 1000
+                ping * 1000,
+                viewDelay * 1000
             )
         end
 
@@ -2855,7 +2855,7 @@ UIControls.SetupMyESPSection = function()
             "MyPingGhost",
             character,
             Color3.fromRGB(255, 215, 80),
-            "PING HITBOX"
+            "REMOTE HITBOX"
         )
 
         updateGhost(
@@ -2863,7 +2863,11 @@ UIControls.SetupMyESPSection = function()
             character,
             root,
             pingCFrame,
-            string.format("PING HITBOX • %.0f ms", ping * 1000)
+            string.format(
+                "REMOTE HITBOX • ping %.0f ms • view ~%.0f ms",
+                ping * 1000,
+                viewDelay * 1000
+            )
         )
 
         setGhostVisible("MyPingGhost", true)
