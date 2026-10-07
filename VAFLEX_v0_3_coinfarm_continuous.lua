@@ -1508,20 +1508,28 @@ do
         local root = defenseState.DesyncRoot
         if root and root.Parent then
             pcall(function()
-                -- Restore exactly what the movement controller produced this frame.
-                -- Anti Aim only owns a short PostSimulation -> PreRender window,
-                -- so Spin / LongJump / Strafe / JumpBoost see their real values.
-                if defenseState.DesyncRealCFrame then
-                    root.CFrame = defenseState.DesyncRealCFrame
+                -- Movement runs on Heartbeat, after this Anti Aim spoof was created.
+                -- If LongJump/Spin/Strafe changed their desired real state during
+                -- that window, restore THEIR result instead of the older snapshot.
+                local restoreCFrame = UIControls.DesyncMovementCFrame or defenseState.DesyncRealCFrame
+                local restoreVelocity = UIControls.DesyncMovementVelocity or defenseState.DesyncRealVelocity
+
+                if restoreCFrame then
+                    root.CFrame = restoreCFrame
                 end
-                if defenseState.DesyncRealVelocity then
-                    root.AssemblyLinearVelocity = defenseState.DesyncRealVelocity
-                    root.Velocity = defenseState.DesyncRealVelocity
+                if restoreVelocity then
+                    root.AssemblyLinearVelocity = restoreVelocity
+                    root.Velocity = restoreVelocity
                 end
             end)
         end
 
         defenseState.DesyncSpoofed = false
+        UIControls.DesyncSpoofActive = false
+        UIControls.DesyncRealCFrame = nil
+        UIControls.DesyncRealVelocity = nil
+        UIControls.DesyncMovementCFrame = nil
+        UIControls.DesyncMovementVelocity = nil
     end
 
     local function stopAntiAim()
@@ -1549,6 +1557,11 @@ do
 
         UIControls.DesyncSpoofVelocity = Vector3.zero
         UIControls.DesyncSpoofCFrame = nil
+        UIControls.DesyncSpoofActive = false
+        UIControls.DesyncRealCFrame = nil
+        UIControls.DesyncRealVelocity = nil
+        UIControls.DesyncMovementCFrame = nil
+        UIControls.DesyncMovementVelocity = nil
     end
 
     local function phaseData(now)
@@ -1606,6 +1619,14 @@ do
             defenseState.DesyncHumanoid = humanoid
             defenseState.DesyncRealCFrame = realCFrame
             defenseState.DesyncRealVelocity = realVelocity
+
+            -- Movement compatibility bridge. Heartbeat movement code can write
+            -- a desired REAL state here without cancelling the network spoof.
+            UIControls.DesyncSpoofActive = true
+            UIControls.DesyncRealCFrame = realCFrame
+            UIControls.DesyncRealVelocity = realVelocity
+            UIControls.DesyncMovementCFrame = nil
+            UIControls.DesyncMovementVelocity = nil
 
             -- Strong-compatible mode:
             -- spoof BOTH sampled position and reported linear velocity, but only
@@ -3458,6 +3479,41 @@ local function SetupMovementPage()
         return humanoid, root
     end
 
+    -- Anti Aim owns the live HRP only from PostSimulation until PreRender.
+    -- These helpers let movement features update the REAL state that will be
+    -- restored, without overwriting the spoof that is being sent/observed.
+    local function GetMovementVelocity(root)
+        if UIControls.DesyncSpoofActive and UIControls.DesyncRealVelocity then
+            return UIControls.DesyncMovementVelocity or UIControls.DesyncRealVelocity
+        end
+        return root.AssemblyLinearVelocity
+    end
+
+    local function SetMovementVelocity(root, velocity)
+        if UIControls.DesyncSpoofActive then
+            UIControls.DesyncMovementVelocity = velocity
+        else
+            root.AssemblyLinearVelocity = velocity
+            root.Velocity = velocity
+        end
+    end
+
+    local function SetMovementCFrame(root, cframe)
+        if UIControls.DesyncSpoofActive then
+            UIControls.DesyncMovementCFrame = cframe
+        else
+            root.CFrame = cframe
+        end
+    end
+
+    local function GetMovementPosition(root)
+        if UIControls.DesyncSpoofActive then
+            local cf = UIControls.DesyncMovementCFrame or UIControls.DesyncRealCFrame
+            if cf then return cf.Position end
+        end
+        return root.Position
+    end
+
     local function RestoreNoclip()
         for part, original in pairs(MovementState.NoclipOriginal) do
             if part and part.Parent then
@@ -4819,12 +4875,12 @@ local function SetupMovementPage()
             jumpVelocity = math.sqrt(2 * workspace.Gravity * math.max(0.1, humanoid.JumpHeight))
         end
 
-        local velocity = root.AssemblyLinearVelocity
-        root.AssemblyLinearVelocity = Vector3.new(
+        local velocity = GetMovementVelocity(root)
+        SetMovementVelocity(root, Vector3.new(
             velocity.X,
             math.max(velocity.Y, jumpVelocity),
             velocity.Z
-        )
+        ))
         humanoid:ChangeState(Enum.HumanoidStateType.Jumping)
     end)
 
@@ -4995,12 +5051,12 @@ local function SetupMovementPage()
                     horizontal = horizontal.Unit
                     local baseSpeed = Config.WalkSpeedEnabled and Config.WalkSpeedValue or humanoid.WalkSpeed
                     local targetSpeed = baseSpeed + Config.LongJumpSpeed
-                    local velocity = root.AssemblyLinearVelocity
-                    root.AssemblyLinearVelocity = Vector3.new(
+                    local velocity = GetMovementVelocity(root)
+                    SetMovementVelocity(root, Vector3.new(
                         horizontal.X * targetSpeed,
                         velocity.Y,
                         horizontal.Z * targetSpeed
-                    )
+                    ))
                 end
             end
         end
@@ -5041,7 +5097,8 @@ local function SetupMovementPage()
             end
 
             MovementState.SpinAngle = (MovementState.SpinAngle + math.rad(Config.SpinSpeed * 7.2) * direction * delta) % (math.pi * 2)
-            root.CFrame = CFrame.new(root.Position) * CFrame.Angles(0, MovementState.SpinAngle, 0)
+            local movementPosition = GetMovementPosition(root)
+            SetMovementCFrame(root, CFrame.new(movementPosition) * CFrame.Angles(0, MovementState.SpinAngle, 0))
             root.AssemblyAngularVelocity = Vector3.zero
         elseif Config.SpinEnabled and spinSuspended then
             MovementState.SpinActive = false
@@ -5057,7 +5114,8 @@ local function SetupMovementPage()
                 local horizontal = Vector3.new(move.X, 0, move.Z)
                 if horizontal.Magnitude > 0.05 then
                     horizontal = horizontal.Unit
-                    root.CFrame = CFrame.lookAt(root.Position, root.Position + horizontal)
+                    local movementPosition = GetMovementPosition(root)
+                    SetMovementCFrame(root, CFrame.lookAt(movementPosition, movementPosition + horizontal))
                     root.AssemblyAngularVelocity = Vector3.zero
                 end
             end
