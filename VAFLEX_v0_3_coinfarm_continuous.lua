@@ -1506,13 +1506,18 @@ do
         if not defenseState.DesyncSpoofed then return end
 
         local root = defenseState.DesyncRoot
-        if root and root.Parent and defenseState.DesyncRealCFrame then
+        if root and root.Parent then
             pcall(function()
-                -- Restore only the temporary positional spoof.
-                -- Do not touch velocity, angular velocity, or Humanoid state:
-                -- movement features such as Spin, LongJump, Strafe and JumpBoost
-                -- must keep ownership of those values.
-                root.CFrame = defenseState.DesyncRealCFrame
+                -- Restore exactly what the movement controller produced this frame.
+                -- Anti Aim only owns a short PostSimulation -> PreRender window,
+                -- so Spin / LongJump / Strafe / JumpBoost see their real values.
+                if defenseState.DesyncRealCFrame then
+                    root.CFrame = defenseState.DesyncRealCFrame
+                end
+                if defenseState.DesyncRealVelocity then
+                    root.AssemblyLinearVelocity = defenseState.DesyncRealVelocity
+                    root.Velocity = defenseState.DesyncRealVelocity
+                end
             end)
         end
 
@@ -1600,21 +1605,35 @@ do
             defenseState.DesyncRoot = root
             defenseState.DesyncHumanoid = humanoid
             defenseState.DesyncRealCFrame = realCFrame
+            defenseState.DesyncRealVelocity = realVelocity
 
-            -- Keep Anti Aim compatible with movement controllers.
-            -- We still use the phase offset, but we do not replace the player's
-            -- real velocity or Humanoid state.
-            local _, baseOffset = phaseData(os.clock())
-            local spoofVelocity = realVelocity
+            -- Strong-compatible mode:
+            -- spoof BOTH sampled position and reported linear velocity, but only
+            -- after physics has finished. Everything is restored before Camera.
+            -- We intentionally do not touch Humanoid state or angular velocity.
+            local spoofVelocity, baseOffset = phaseData(os.clock())
 
-            -- When standing still, position samples are the strongest fallback in
-            -- SYDJA. Add a small packet-sized XZ displacement so its measured
-            -- trajectory also changes. While already moving, keep the displacement
-            -- smaller so normal control remains usable.
             local horizontalReal = Vector3.new(realVelocity.X, 0, realVelocity.Z).Magnitude
-            local scale = horizontalReal < 2 and 1.00 or (horizontalReal < 12 and 0.62 or 0.35)
-            local offset = baseOffset * scale
+            local scale
+            if horizontalReal < 1.5 then
+                scale = 1.35
+            elseif horizontalReal < 12 then
+                scale = 0.95
+            elseif horizontalReal < 28 then
+                scale = 0.68
+            else
+                scale = 0.48
+            end
 
+            -- Add a small velocity-dependent lead in the opposite direction so
+            -- position-history predictors and velocity predictors disagree.
+            local horizontalVelocity = Vector3.new(realVelocity.X, 0, realVelocity.Z)
+            local counterLead = Vector3.zero
+            if horizontalVelocity.Magnitude > 0.5 then
+                counterLead = -horizontalVelocity.Unit * math.clamp(horizontalVelocity.Magnitude * 0.018, 0.08, 0.42)
+            end
+
+            local offset = baseOffset * scale + counterLead
             local p = realCFrame.Position
             local rotation = realCFrame - p
             local spoofCFrame = CFrame.new(p + offset) * rotation
@@ -1625,9 +1644,9 @@ do
             UIControls.DesyncSpoofCFrame = spoofCFrame
 
             pcall(function()
-                -- Position-only spoof. This avoids fighting the Movement page
-                -- over velocity, rotation physics, and Humanoid states.
                 root.CFrame = spoofCFrame
+                root.AssemblyLinearVelocity = spoofVelocity
+                root.Velocity = spoofVelocity
                 defenseState.DesyncSpoofed = true
             end)
         end)
