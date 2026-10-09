@@ -1575,51 +1575,39 @@ do
         UIControls.DesyncSpoofCFrame = nil
     end
 
-    local function phaseData(now, isStatic)
-        local phase = math.floor(now / (isStatic and 0.041 or 0.033)) % 8
+    local function phaseData(now)
+        local phase = math.floor(now / 0.031) % 8
 
-        local velocities = {
-            Vector3.new(78, 82, 18),
-            Vector3.new(-74, 56, 26),
-            Vector3.new(28, 84, -76),
-            Vector3.new(-38, 58, -72),
-            Vector3.new(72, 86, -30),
-            Vector3.new(-80, 54, -14),
-            Vector3.new(20, 80, 78),
-            Vector3.new(-26, 60, -76),
+        local vectors = {
+            Vector3.new(82, 84, 12),
+            Vector3.new(-76, 58, 28),
+            Vector3.new(34, 82, -78),
+            Vector3.new(-42, 56, -74),
+            Vector3.new(70, 86, -36),
+            Vector3.new(-84, 60, -8),
+            Vector3.new(18, 80, 84),
+            Vector3.new(-22, 54, -82),
         }
 
-        local staticOffsets = {
-            Vector3.new( 1.75, 0,  0.30),
-            Vector3.new(-1.65, 0,  0.55),
-            Vector3.new( 0.40, 0, -1.80),
-            Vector3.new(-0.65, 0, -1.65),
-            Vector3.new( 1.70, 0, -0.70),
-            Vector3.new(-1.85, 0, -0.20),
-            Vector3.new( 0.35, 0,  1.80),
-            Vector3.new(-0.55, 0,  1.70),
+        local offsets = {
+            Vector3.new(0.62, 0, 0.18),
+            Vector3.new(-0.58, 0, 0.28),
+            Vector3.new(0.24, 0, -0.64),
+            Vector3.new(-0.38, 0, -0.57),
+            Vector3.new(0.60, 0, -0.30),
+            Vector3.new(-0.66, 0, -0.06),
+            Vector3.new(0.16, 0, 0.64),
+            Vector3.new(-0.22, 0, -0.63),
         }
 
-        local movingOffsets = {
-            Vector3.new( 0.58, 0,  0.16),
-            Vector3.new(-0.54, 0,  0.25),
-            Vector3.new( 0.20, 0, -0.60),
-            Vector3.new(-0.34, 0, -0.54),
-            Vector3.new( 0.56, 0, -0.28),
-            Vector3.new(-0.62, 0, -0.08),
-            Vector3.new( 0.16, 0,  0.60),
-            Vector3.new(-0.20, 0, -0.58),
-        }
-
-        return velocities[phase + 1],
-            (isStatic and staticOffsets or movingOffsets)[phase + 1]
+        return vectors[phase + 1], offsets[phase + 1]
     end
 
     local function startAntiAim()
         stopAntiAim()
         if not Config.DesyncAntiAimEnabled then return end
 
-        local stepSignal = RunService.PreSimulation or RunService.Stepped
+        local stepSignal = RunService.PostSimulation or RunService.Heartbeat
         defenseState.DesyncStep = stepSignal:Connect(function()
             if not Running or not Config.DesyncAntiAimEnabled then return end
 
@@ -1659,16 +1647,15 @@ do
                 end)
             end
 
+            local spoofVelocity, baseOffset = phaseData(os.clock())
+
+            -- When standing still, position samples are the strongest fallback in
+            -- SYDJA. Add a small packet-sized XZ displacement so its measured
+            -- trajectory also changes. While already moving, keep the displacement
+            -- smaller so normal control remains usable.
             local horizontalReal = Vector3.new(realVelocity.X, 0, realVelocity.Z).Magnitude
-            local moveDirection = humanoid.MoveDirection
-            local isStatic = horizontalReal < 1.4 and moveDirection.Magnitude < 0.05
-
-            local spoofVelocity, offset = phaseData(os.clock(), isStatic)
-
-            if not isStatic then
-                local scale = horizontalReal < 12 and 0.75 or 0.45
-                offset *= scale
-            end
+            local scale = horizontalReal < 2 and 1.00 or (horizontalReal < 12 and 0.62 or 0.35)
+            local offset = baseOffset * scale
 
             local p = realCFrame.Position
             local rotation = realCFrame - p
@@ -1714,7 +1701,7 @@ do
         end)
 
         if UIControls.DefenseStatus then
-            UIControls.DefenseStatus.Text = "Anti Aim enabled • replication unverified"
+            UIControls.DefenseStatus.Text = "Anti Aim enabled"
         end
     end
 
@@ -1730,7 +1717,7 @@ do
 
         if UIControls.DefenseStatus then
             if value then
-                UIControls.DefenseStatus.Text = "Anti Aim enabled • replication unverified"
+                UIControls.DefenseStatus.Text = "Anti Aim enabled"
             elseif Config.AntiFlingEnabled then
                 UIControls.DefenseStatus.Text = "Anti Fling enabled"
             else
@@ -1753,7 +1740,7 @@ do
             else
                 stopAntiFling()
                 if UIControls.DefenseStatus then
-                    UIControls.DefenseStatus.Text = Config.DesyncAntiAimEnabled and "Anti Aim enabled • replication unverified" or "Defense idle"
+                    UIControls.DefenseStatus.Text = Config.DesyncAntiAimEnabled and "Anti Aim enabled" or "Defense idle"
                 end
             end
         end
