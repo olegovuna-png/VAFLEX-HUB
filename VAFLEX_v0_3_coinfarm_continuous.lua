@@ -57,8 +57,8 @@ local Config = {
         ShowAvatar = false,
     },
 
-    -- Fixed by device: Desktop 120%, Mobile 75%
-    WatermarkScale = WATERMARK_DEVICE_SCALE,
+    -- Watermark scale: 0.52 = 52%
+    WatermarkScale = 0.52,
 
     -- Movement
     WalkSpeedEnabled = false,
@@ -4967,7 +4967,7 @@ do
         ShowNickname = true,
         ShowFPS = true,
         ShowPing = true,
-        WatermarkScale = WATERMARK_DEVICE_SCALE,
+        WatermarkScale = 0.52,
         WalkSpeedEnabled = false,
         WalkSpeedValue = 16,
         LongJumpEnabled = false,
@@ -5003,6 +5003,7 @@ do
             ShowNickname = Config.WatermarkOptions.ShowNickname,
             ShowFPS = Config.WatermarkOptions.ShowFPS,
             ShowPing = Config.WatermarkOptions.ShowPing,
+            WatermarkScale = Config.WatermarkScale,
             WalkSpeedEnabled = Config.WalkSpeedEnabled,
             WalkSpeedValue = Config.WalkSpeedValue,
             LongJumpEnabled = Config.LongJumpEnabled,
@@ -5040,7 +5041,7 @@ do
         Config.WatermarkOptions.ShowNickname = snapshot.ShowNickname
         Config.WatermarkOptions.ShowFPS = snapshot.ShowFPS
         Config.WatermarkOptions.ShowPing = snapshot.ShowPing
-        Config.WatermarkScale = WATERMARK_DEVICE_SCALE
+        Config.WatermarkScale = math.clamp(snapshot.WatermarkScale or 0.52, 0.30, 1.20)
 
         Config.WalkSpeedEnabled = snapshot.WalkSpeedEnabled == true
         Config.WalkSpeedValue = math.clamp(snapshot.WalkSpeedValue or 16, 1, 100)
@@ -5074,6 +5075,7 @@ do
         UIControls.WatermarkNickname:SetInstant(Config.WatermarkOptions.ShowNickname, false)
         UIControls.WatermarkFPS:SetInstant(Config.WatermarkOptions.ShowFPS, false)
         UIControls.WatermarkPing:SetInstant(Config.WatermarkOptions.ShowPing, false)
+        UIControls.WatermarkScale:Set(Config.WatermarkScale, false)
 
         if UIControls.WalkSpeedSwitch then UIControls.WalkSpeedSwitch:SetInstant(Config.WalkSpeedEnabled, false) end
         if UIControls.LongJumpSwitch then UIControls.LongJumpSwitch:SetInstant(Config.LongJumpEnabled, false) end
@@ -5099,7 +5101,7 @@ do
         if UIControls.SetCoinFarmSpeed then UIControls.SetCoinFarmSpeed(Config.CoinFarmSpeed) end
 
         if UIControls.WatermarkScaleObject then
-            UIControls.WatermarkScaleObject.Scale = WATERMARK_DEVICE_SCALE
+            UIControls.WatermarkScaleObject.Scale = Config.WatermarkScale
         end
 
         if SetWatermarkEnabled then
@@ -6093,8 +6095,6 @@ Connect(RunService.RenderStepped, function()
 end)
 
 --// ============================================================
-Config.WatermarkScale = WATERMARK_DEVICE_SCALE
-
 --// SMOOTH MENU <-> WATERMARK TRANSITION
 --// ============================================================
 
