@@ -15,6 +15,9 @@ local Debris = game:GetService("Debris")
 local LocalPlayer = Players.LocalPlayer
 local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
 
+local IsDesktop = UserInputService.KeyboardEnabled and UserInputService.MouseEnabled
+local WATERMARK_DEVICE_SCALE = IsDesktop and 1.20 or 0.75
+
 --// ============================================================
 --// CLEAN OLD VAFLEX
 --// ============================================================
@@ -54,8 +57,8 @@ local Config = {
         ShowAvatar = false,
     },
 
-    -- Watermark scale: 0.52 = 52%
-    WatermarkScale = 0.52,
+    -- Fixed by device: Desktop 120%, Mobile 75%
+    WatermarkScale = WATERMARK_DEVICE_SCALE,
 
     -- Movement
     WalkSpeedEnabled = false,
@@ -1381,6 +1384,9 @@ do
         DesyncRealAngularVelocity = nil,
         DesyncRealHumanoidState = nil,
 
+        DesyncCamera = nil,
+        DesyncCameraRelative = nil,
+
         DesyncSpoofVelocity = Vector3.zero,
         DesyncSpoofCFrame = nil,
         DesyncSpoofed = false,
@@ -1506,30 +1512,38 @@ do
         if not defenseState.DesyncSpoofed then return end
 
         local root = defenseState.DesyncRoot
+        local humanoid = defenseState.DesyncHumanoid
+
         if root and root.Parent then
             pcall(function()
-                -- Movement runs on Heartbeat, after this Anti Aim spoof was created.
-                -- If LongJump/Spin/Strafe changed their desired real state during
-                -- that window, restore THEIR result instead of the older snapshot.
-                local restoreCFrame = UIControls.DesyncMovementCFrame or defenseState.DesyncRealCFrame
-                local restoreVelocity = UIControls.DesyncMovementVelocity or defenseState.DesyncRealVelocity
-
-                if restoreCFrame then
-                    root.CFrame = restoreCFrame
+                if defenseState.DesyncRealCFrame then
+                    root.CFrame = defenseState.DesyncRealCFrame
                 end
-                if restoreVelocity then
-                    root.AssemblyLinearVelocity = restoreVelocity
-                    root.Velocity = restoreVelocity
+                if defenseState.DesyncRealVelocity then
+                    root.AssemblyLinearVelocity = defenseState.DesyncRealVelocity
+                    root.Velocity = defenseState.DesyncRealVelocity
+                end
+                if defenseState.DesyncRealAngularVelocity then
+                    root.AssemblyAngularVelocity = defenseState.DesyncRealAngularVelocity
+                    root.RotVelocity = defenseState.DesyncRealAngularVelocity
                 end
             end)
         end
 
+        if humanoid and humanoid.Parent and defenseState.DesyncRealHumanoidState then
+            pcall(function()
+                humanoid:ChangeState(defenseState.DesyncRealHumanoidState)
+            end)
+        end
+
+        local camera = defenseState.DesyncCamera
+        if camera and camera.Parent and defenseState.DesyncRealCFrame and defenseState.DesyncCameraRelative then
+            pcall(function()
+                camera.CFrame = defenseState.DesyncRealCFrame * defenseState.DesyncCameraRelative
+            end)
+        end
+
         defenseState.DesyncSpoofed = false
-        UIControls.DesyncSpoofActive = false
-        UIControls.DesyncRealCFrame = nil
-        UIControls.DesyncRealVelocity = nil
-        UIControls.DesyncMovementCFrame = nil
-        UIControls.DesyncMovementVelocity = nil
     end
 
     local function stopAntiAim()
@@ -1551,64 +1565,63 @@ do
         defenseState.DesyncRealVelocity = nil
         defenseState.DesyncRealAngularVelocity = nil
         defenseState.DesyncRealHumanoidState = nil
+        defenseState.DesyncCamera = nil
+        defenseState.DesyncCameraRelative = nil
         defenseState.DesyncSpoofVelocity = Vector3.zero
         defenseState.DesyncSpoofCFrame = nil
         defenseState.DesyncSpoofed = false
 
         UIControls.DesyncSpoofVelocity = Vector3.zero
         UIControls.DesyncSpoofCFrame = nil
-        UIControls.DesyncSpoofActive = false
-        UIControls.DesyncRealCFrame = nil
-        UIControls.DesyncRealVelocity = nil
-        UIControls.DesyncMovementCFrame = nil
-        UIControls.DesyncMovementVelocity = nil
     end
 
-    local function phaseData(now)
-        local phase = math.floor(now / 0.031) % 8
+    local function phaseData(now, isStatic)
+        local phase = math.floor(now / (isStatic and 0.041 or 0.033)) % 8
 
-        local vectors = {
-            Vector3.new(82, 84, 12),
-            Vector3.new(-76, 58, 28),
-            Vector3.new(34, 82, -78),
-            Vector3.new(-42, 56, -74),
-            Vector3.new(70, 86, -36),
-            Vector3.new(-84, 60, -8),
-            Vector3.new(18, 80, 84),
-            Vector3.new(-22, 54, -82),
+        local velocities = {
+            Vector3.new(78, 82, 18),
+            Vector3.new(-74, 56, 26),
+            Vector3.new(28, 84, -76),
+            Vector3.new(-38, 58, -72),
+            Vector3.new(72, 86, -30),
+            Vector3.new(-80, 54, -14),
+            Vector3.new(20, 80, 78),
+            Vector3.new(-26, 60, -76),
         }
 
-        local offsets = {
-            Vector3.new(0.62, 0, 0.18),
-            Vector3.new(-0.58, 0, 0.28),
-            Vector3.new(0.24, 0, -0.64),
-            Vector3.new(-0.38, 0, -0.57),
-            Vector3.new(0.60, 0, -0.30),
-            Vector3.new(-0.66, 0, -0.06),
-            Vector3.new(0.16, 0, 0.64),
-            Vector3.new(-0.22, 0, -0.63),
+        local staticOffsets = {
+            Vector3.new( 1.75, 0,  0.30),
+            Vector3.new(-1.65, 0,  0.55),
+            Vector3.new( 0.40, 0, -1.80),
+            Vector3.new(-0.65, 0, -1.65),
+            Vector3.new( 1.70, 0, -0.70),
+            Vector3.new(-1.85, 0, -0.20),
+            Vector3.new( 0.35, 0,  1.80),
+            Vector3.new(-0.55, 0,  1.70),
         }
 
-        return vectors[phase + 1], offsets[phase + 1]
+        local movingOffsets = {
+            Vector3.new( 0.58, 0,  0.16),
+            Vector3.new(-0.54, 0,  0.25),
+            Vector3.new( 0.20, 0, -0.60),
+            Vector3.new(-0.34, 0, -0.54),
+            Vector3.new( 0.56, 0, -0.28),
+            Vector3.new(-0.62, 0, -0.08),
+            Vector3.new( 0.16, 0,  0.60),
+            Vector3.new(-0.20, 0, -0.58),
+        }
+
+        return velocities[phase + 1],
+            (isStatic and staticOffsets or movingOffsets)[phase + 1]
     end
 
     local function startAntiAim()
         stopAntiAim()
         if not Config.DesyncAntiAimEnabled then return end
 
-        local stepSignal = RunService.PostSimulation or RunService.Heartbeat
+        local stepSignal = RunService.PreSimulation or RunService.Stepped
         defenseState.DesyncStep = stepSignal:Connect(function()
             if not Running or not Config.DesyncAntiAimEnabled then return end
-
-            -- Fling temporarily owns the local HumanoidRootPart. If Anti Aim keeps
-            -- restoring its pre-fling snapshot here, the fling return teleport gets
-            -- overwritten and the local player can remain at the target.
-            if UIControls.DesyncSuspended or UIControls.FlingBusy then
-                if defenseState.DesyncSpoofed then
-                    restoreAntiAim()
-                end
-                return
-            end
 
             local character = LocalPlayer.Character
             local humanoid = character and character:FindFirstChildOfClass("Humanoid")
@@ -1623,48 +1636,40 @@ do
 
             local realCFrame = root.CFrame
             local realVelocity = root.AssemblyLinearVelocity
+            local realAngular = root.AssemblyAngularVelocity
 
             defenseState.DesyncCharacter = character
             defenseState.DesyncRoot = root
             defenseState.DesyncHumanoid = humanoid
             defenseState.DesyncRealCFrame = realCFrame
             defenseState.DesyncRealVelocity = realVelocity
+            defenseState.DesyncRealAngularVelocity = realAngular
 
-            -- Movement compatibility bridge. Heartbeat movement code can write
-            -- a desired REAL state here without cancelling the network spoof.
-            UIControls.DesyncSpoofActive = true
-            UIControls.DesyncRealCFrame = realCFrame
-            UIControls.DesyncRealVelocity = realVelocity
-            UIControls.DesyncMovementCFrame = nil
-            UIControls.DesyncMovementVelocity = nil
+            local okState, stateNow = pcall(function()
+                return humanoid:GetState()
+            end)
+            defenseState.DesyncRealHumanoidState = okState and stateNow or nil
 
-            -- Strong-compatible mode:
-            -- spoof BOTH sampled position and reported linear velocity, but only
-            -- after physics has finished. Everything is restored before Camera.
-            -- We intentionally do not touch Humanoid state or angular velocity.
-            local spoofVelocity, baseOffset = phaseData(os.clock())
+            local camera = Workspace.CurrentCamera
+            defenseState.DesyncCamera = camera
+            defenseState.DesyncCameraRelative = nil
+            if camera then
+                pcall(function()
+                    defenseState.DesyncCameraRelative = realCFrame:ToObjectSpace(camera.CFrame)
+                end)
+            end
 
             local horizontalReal = Vector3.new(realVelocity.X, 0, realVelocity.Z).Magnitude
-            local scale
-            if horizontalReal < 1.5 then
-                scale = 1.35
-            elseif horizontalReal < 12 then
-                scale = 0.95
-            elseif horizontalReal < 28 then
-                scale = 0.68
-            else
-                scale = 0.48
+            local moveDirection = humanoid.MoveDirection
+            local isStatic = horizontalReal < 1.4 and moveDirection.Magnitude < 0.05
+
+            local spoofVelocity, offset = phaseData(os.clock(), isStatic)
+
+            if not isStatic then
+                local scale = horizontalReal < 12 and 0.75 or 0.45
+                offset *= scale
             end
 
-            -- Add a small velocity-dependent lead in the opposite direction so
-            -- position-history predictors and velocity predictors disagree.
-            local horizontalVelocity = Vector3.new(realVelocity.X, 0, realVelocity.Z)
-            local counterLead = Vector3.zero
-            if horizontalVelocity.Magnitude > 0.5 then
-                counterLead = -horizontalVelocity.Unit * math.clamp(horizontalVelocity.Magnitude * 0.018, 0.08, 0.42)
-            end
-
-            local offset = baseOffset * scale + counterLead
             local p = realCFrame.Position
             local rotation = realCFrame - p
             local spoofCFrame = CFrame.new(p + offset) * rotation
@@ -1675,53 +1680,41 @@ do
             UIControls.DesyncSpoofCFrame = spoofCFrame
 
             pcall(function()
+                -- Small CFrame displacement + accepted (<90 XZ) velocity gives the
+                -- predictor both a fake reported velocity and fake measured motion.
                 root.CFrame = spoofCFrame
                 root.AssemblyLinearVelocity = spoofVelocity
                 root.Velocity = spoofVelocity
+                root.AssemblyAngularVelocity = Vector3.zero
+                root.RotVelocity = Vector3.zero
+
+                -- Fresh Jumping state + accepted vertical velocity attacks the
+                -- predictor's strongest vertical branch.
+                humanoid:ChangeState(Enum.HumanoidStateType.Jumping)
+
                 defenseState.DesyncSpoofed = true
             end)
         end)
 
-        local ANTI_AIM_RESTORE_BIND = "VAFLEX_AntiAimRestore"
-        pcall(function()
-            RunService:UnbindFromRenderStep(ANTI_AIM_RESTORE_BIND)
+        local restoreSignal = RunService.PreRender or RunService.RenderStepped
+        defenseState.DesyncRestore = restoreSignal:Connect(function()
+            if not Running or not Config.DesyncAntiAimEnabled then
+                restoreAntiAim()
+                return
+            end
+
+            if defenseState.DesyncCharacter ~= LocalPlayer.Character then
+                restoreAntiAim()
+                defenseState.DesyncCharacter = nil
+                defenseState.DesyncRoot = nil
+                return
+            end
+
+            restoreAntiAim()
         end)
 
-        RunService:BindToRenderStep(
-            ANTI_AIM_RESTORE_BIND,
-            Enum.RenderPriority.Camera.Value - 1,
-            function()
-                if not Running or not Config.DesyncAntiAimEnabled then
-                    restoreAntiAim()
-                    return
-                end
-
-                if UIControls.DesyncSuspended or UIControls.FlingBusy then
-                    restoreAntiAim()
-                    return
-                end
-
-                if defenseState.DesyncCharacter ~= LocalPlayer.Character then
-                    restoreAntiAim()
-                    defenseState.DesyncCharacter = nil
-                    defenseState.DesyncRoot = nil
-                    return
-                end
-
-                restoreAntiAim()
-            end
-        )
-
-        defenseState.DesyncRestore = {
-            Disconnect = function()
-                pcall(function()
-                    RunService:UnbindFromRenderStep(ANTI_AIM_RESTORE_BIND)
-                end)
-            end
-        }
-
         if UIControls.DefenseStatus then
-            UIControls.DefenseStatus.Text = "Anti Aim enabled"
+            UIControls.DefenseStatus.Text = "Anti Aim enabled • replication unverified"
         end
     end
 
@@ -1737,7 +1730,7 @@ do
 
         if UIControls.DefenseStatus then
             if value then
-                UIControls.DefenseStatus.Text = "Anti Aim enabled"
+                UIControls.DefenseStatus.Text = "Anti Aim enabled • replication unverified"
             elseif Config.AntiFlingEnabled then
                 UIControls.DefenseStatus.Text = "Anti Fling enabled"
             else
@@ -1760,7 +1753,7 @@ do
             else
                 stopAntiFling()
                 if UIControls.DefenseStatus then
-                    UIControls.DefenseStatus.Text = Config.DesyncAntiAimEnabled and "Anti Aim enabled" or "Defense idle"
+                    UIControls.DefenseStatus.Text = Config.DesyncAntiAimEnabled and "Anti Aim enabled • replication unverified" or "Defense idle"
                 end
             end
         end
@@ -1790,18 +1783,6 @@ do
             UIControls.DesyncAntiAimSwitch:SetInstant(value, false)
         end
         return setAntiAim(value)
-    end
-
-    -- Temporary suspension does NOT toggle the Anti Aim switch. It only gives
-    -- short-lived systems such as Fling exclusive ownership of HRP/CFrame.
-    UIControls.SuspendDesyncAntiAim = function(value)
-        UIControls.DesyncSuspended = value and true or false
-
-        if UIControls.DesyncSuspended then
-            -- Flush any spoof that was already active before Fling starts so
-            -- returnPivot is captured from the real local position.
-            restoreAntiAim()
-        end
     end
 
     Connect(LocalPlayer.CharacterAdded, function()
@@ -2571,7 +2552,7 @@ UIControls.SetupMyESPSection = function()
         Position = UDim2.fromOffset(13, 0),
         Size = UDim2.new(1, -80, 1, 0),
         BackgroundTransparency = 1,
-        Text = "Show Ping Hitbox",
+        Text = "Show Ping Estimate",
         TextColor3 = Config.Text,
         TextSize = 10,
         Font = Enum.Font.GothamSemibold,
@@ -2593,7 +2574,7 @@ UIControls.SetupMyESPSection = function()
         Position = UDim2.fromOffset(10, 103),
         Size = UDim2.new(1, -20, 0, 34),
         BackgroundTransparency = 1,
-        Text = "PING -- ms • VIEW -- ms",
+        Text = "Ping estimate: unavailable",
         TextColor3 = Config.Muted,
         TextSize = 7,
         Font = Enum.Font.Gotham,
@@ -2657,16 +2638,12 @@ UIControls.SetupMyESPSection = function()
 
     local function getPingEstimate(root)
         local ping = getPingSeconds()
-
-        -- Approximate where a remote client may still render us:
-        -- local client -> server + server -> remote client + replication/render buffer.
-        local replicationBuffer = 0.045
-        local viewDelay = math.clamp(ping + replicationBuffer, 0.050, 0.350)
-        local targetTime = os.clock() - viewDelay
+        local oneWay = math.clamp(ping * 0.5, 0, 0.45)
+        local targetTime = os.clock() - oneWay
         local history = UIControls.MyHitboxHistory
 
         if #history == 0 then
-            return root.CFrame, ping, viewDelay
+            return root.CFrame, ping
         end
 
         local before = history[1]
@@ -2682,7 +2659,7 @@ UIControls.SetupMyESPSection = function()
         end
 
         if before == after or after.Time <= before.Time then
-            return before.CFrame, ping, viewDelay
+            return before.CFrame, ping
         end
 
         local alpha = math.clamp(
@@ -2691,7 +2668,7 @@ UIControls.SetupMyESPSection = function()
             1
         )
 
-        return before.CFrame:Lerp(after.CFrame, alpha), ping, viewDelay
+        return before.CFrame:Lerp(after.CFrame, alpha), ping
     end
 
     local function destroyGhost(key)
@@ -2838,7 +2815,7 @@ UIControls.SetupMyESPSection = function()
         clearHistory()
 
         if UIControls.MyHitboxPositionLabel then
-            UIControls.MyHitboxPositionLabel.Text = "PING -- ms • VIEW -- ms"
+            UIControls.MyHitboxPositionLabel.Text = "Ping estimate: unavailable"
         end
     end
 
@@ -2863,7 +2840,7 @@ UIControls.SetupMyESPSection = function()
             setGhostVisible("MyPingGhost", false)
 
             if UIControls.MyHitboxPositionLabel then
-                UIControls.MyHitboxPositionLabel.Text = "PING -- ms • VIEW -- ms"
+                UIControls.MyHitboxPositionLabel.Text = "Ping estimate: unavailable"
             end
             return
         end
@@ -2871,7 +2848,7 @@ UIControls.SetupMyESPSection = function()
         pushHistory(root)
 
         local localCFrame = root.CFrame
-        local pingCFrame, ping, viewDelay = getPingEstimate(root)
+        local pingCFrame, ping = getPingEstimate(root)
         local pingPos = pingCFrame.Position
 
         UIControls.MyEstimatedServerCFrame = pingCFrame
@@ -2879,9 +2856,9 @@ UIControls.SetupMyESPSection = function()
 
         if UIControls.MyHitboxPositionLabel then
             UIControls.MyHitboxPositionLabel.Text = string.format(
-                "PING %.0f ms • VIEW ~%.0f ms",
-                ping * 1000,
-                viewDelay * 1000
+                "Ping est: %.1f, %.1f, %.1f • %.0f ms",
+                pingPos.X, pingPos.Y, pingPos.Z,
+                ping * 1000
             )
         end
 
@@ -2894,7 +2871,7 @@ UIControls.SetupMyESPSection = function()
             "MyPingGhost",
             character,
             Color3.fromRGB(255, 215, 80),
-            ""
+            "PING ESTIMATE"
         )
 
         updateGhost(
@@ -2902,11 +2879,7 @@ UIControls.SetupMyESPSection = function()
             character,
             root,
             pingCFrame,
-            string.format(
-                "PING %.0f ms • VIEW ~%.0f ms",
-                ping * 1000,
-                viewDelay * 1000
-            )
+            string.format("PING ESTIMATE • %.0f ms", ping * 1000)
         )
 
         setGhostVisible("MyPingGhost", true)
@@ -3096,7 +3069,7 @@ WatermarkSettingsShade.Parent = Main
 local WatermarkSettingsPanel = New("Frame", {
     AnchorPoint = Vector2.new(0.5, 0.5),
     Position = UDim2.fromScale(0.5, 0.5),
-    Size = UDim2.fromOffset(270, 270),
+    Size = UDim2.fromOffset(270, 218),
     BackgroundColor3 = Color3.fromRGB(24, 30, 42),
     BackgroundTransparency = 0.03,
     BorderSizePixel = 0,
@@ -3177,143 +3150,6 @@ UIControls.WatermarkPing = CreateOptionRow(
     function(value) Config.WatermarkOptions.ShowPing = value end
 )
 
-do
-local function CreateScaleSlider(parent, y, defaultValue, callback)
-    local MinScale = 0.30
-    local MaxScale = 1.20
-    local current = math.clamp(defaultValue, MinScale, MaxScale)
-    local dragging = false
-
-    local Row = New("Frame", {
-        Position = UDim2.fromOffset(12, y),
-        Size = UDim2.new(1, -24, 0, 49),
-        BackgroundColor3 = Config.Panel2,
-        BackgroundTransparency = 0.07,
-        BorderSizePixel = 0,
-        ZIndex = 331,
-    })
-    Row.Parent = parent
-    Corner(Row, 11)
-
-    local Title = New("TextLabel", {
-        Position = UDim2.fromOffset(12, 5),
-        Size = UDim2.new(1, -75, 0, 16),
-        BackgroundTransparency = 1,
-        Text = "Scale",
-        TextColor3 = Config.Text,
-        TextSize = 8,
-        Font = Enum.Font.GothamSemibold,
-        TextXAlignment = Enum.TextXAlignment.Left,
-        ZIndex = 332,
-    })
-    Title.Parent = Row
-
-    local ValueLabel = New("TextLabel", {
-        AnchorPoint = Vector2.new(1, 0),
-        Position = UDim2.new(1, -12, 0, 5),
-        Size = UDim2.fromOffset(58, 16),
-        BackgroundTransparency = 1,
-        Text = tostring(math.floor(current * 100 + 0.5)) .. "%",
-        TextColor3 = Config.WaterBright,
-        TextSize = 8,
-        Font = Enum.Font.GothamBold,
-        TextXAlignment = Enum.TextXAlignment.Right,
-        ZIndex = 332,
-    })
-    ValueLabel.Parent = Row
-
-    local Track = New("TextButton", {
-        Position = UDim2.fromOffset(12, 30),
-        Size = UDim2.new(1, -24, 0, 6),
-        BackgroundColor3 = Color3.fromRGB(55, 64, 79),
-        BorderSizePixel = 0,
-        Text = "",
-        AutoButtonColor = false,
-        ZIndex = 332,
-    })
-    Track.Parent = Row
-    Corner(Track, 999)
-
-    local Fill = New("Frame", {
-        Size = UDim2.fromScale(0, 1),
-        BackgroundColor3 = Config.Water,
-        BorderSizePixel = 0,
-        ZIndex = 333,
-    })
-    Fill.Parent = Track
-    Corner(Fill, 999)
-
-    local Knob = New("Frame", {
-        AnchorPoint = Vector2.new(0.5, 0.5),
-        Position = UDim2.new(0, 0, 0.5, 0),
-        Size = UDim2.fromOffset(14, 14),
-        BackgroundColor3 = Config.WaterWhite,
-        BorderSizePixel = 0,
-        ZIndex = 334,
-    })
-    Knob.Parent = Track
-    Corner(Knob, 999)
-    Stroke(Knob, Config.Water, 0.18, 1)
-
-    local function Apply(value, triggerCallback)
-        current = math.clamp(value, MinScale, MaxScale)
-        local alpha = (current - MinScale) / (MaxScale - MinScale)
-        Fill.Size = UDim2.fromScale(alpha, 1)
-        Knob.Position = UDim2.new(alpha, 0, 0.5, 0)
-        ValueLabel.Text = tostring(math.floor(current * 100 + 0.5)) .. "%"
-        if triggerCallback ~= false then callback(current) end
-    end
-
-    local function ApplyFromX(x)
-        local width = math.max(1, Track.AbsoluteSize.X)
-        local alpha = math.clamp((x - Track.AbsolutePosition.X) / width, 0, 1)
-        Apply(MinScale + (MaxScale - MinScale) * alpha, true)
-    end
-
-    Connect(Track.InputBegan, function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-            dragging = true
-            ApplyFromX(input.Position.X)
-        end
-    end)
-
-    Connect(UserInputService.InputChanged, function(input)
-        if not dragging then return end
-        if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
-            ApplyFromX(input.Position.X)
-        end
-    end)
-
-    Connect(UserInputService.InputEnded, function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-            dragging = false
-        end
-    end)
-
-    Apply(current, false)
-
-    return {
-        Set = function(_, value, triggerCallback)
-            Apply(value, triggerCallback)
-        end,
-        Get = function()
-            return current
-        end,
-    }
-end
-
-UIControls.WatermarkScale = CreateScaleSlider(
-    WatermarkSettingsPanel,
-    209,
-    Config.WatermarkScale,
-    function(value)
-        Config.WatermarkScale = value
-        if UIControls.WatermarkScaleObject then
-            Tween(UIControls.WatermarkScaleObject, 0.12, { Scale = value }, Enum.EasingStyle.Sine)
-        end
-    end
-)
-end
 
 local WatermarkSettingsOpen = false
 
@@ -3504,41 +3340,6 @@ local function SetupMovementPage()
         local humanoid = character:FindFirstChildOfClass("Humanoid")
         local root = character:FindFirstChild("HumanoidRootPart")
         return humanoid, root
-    end
-
-    -- Anti Aim owns the live HRP only from PostSimulation until PreRender.
-    -- These helpers let movement features update the REAL state that will be
-    -- restored, without overwriting the spoof that is being sent/observed.
-    local function GetMovementVelocity(root)
-        if UIControls.DesyncSpoofActive and UIControls.DesyncRealVelocity then
-            return UIControls.DesyncMovementVelocity or UIControls.DesyncRealVelocity
-        end
-        return root.AssemblyLinearVelocity
-    end
-
-    local function SetMovementVelocity(root, velocity)
-        if UIControls.DesyncSpoofActive then
-            UIControls.DesyncMovementVelocity = velocity
-        else
-            root.AssemblyLinearVelocity = velocity
-            root.Velocity = velocity
-        end
-    end
-
-    local function SetMovementCFrame(root, cframe)
-        if UIControls.DesyncSpoofActive then
-            UIControls.DesyncMovementCFrame = cframe
-        else
-            root.CFrame = cframe
-        end
-    end
-
-    local function GetMovementPosition(root)
-        if UIControls.DesyncSpoofActive then
-            local cf = UIControls.DesyncMovementCFrame or UIControls.DesyncRealCFrame
-            if cf then return cf.Position end
-        end
-        return root.Position
     end
 
     local function RestoreNoclip()
@@ -4902,12 +4703,12 @@ local function SetupMovementPage()
             jumpVelocity = math.sqrt(2 * workspace.Gravity * math.max(0.1, humanoid.JumpHeight))
         end
 
-        local velocity = GetMovementVelocity(root)
-        SetMovementVelocity(root, Vector3.new(
+        local velocity = root.AssemblyLinearVelocity
+        root.AssemblyLinearVelocity = Vector3.new(
             velocity.X,
             math.max(velocity.Y, jumpVelocity),
             velocity.Z
-        ))
+        )
         humanoid:ChangeState(Enum.HumanoidStateType.Jumping)
     end)
 
@@ -5078,12 +4879,12 @@ local function SetupMovementPage()
                     horizontal = horizontal.Unit
                     local baseSpeed = Config.WalkSpeedEnabled and Config.WalkSpeedValue or humanoid.WalkSpeed
                     local targetSpeed = baseSpeed + Config.LongJumpSpeed
-                    local velocity = GetMovementVelocity(root)
-                    SetMovementVelocity(root, Vector3.new(
+                    local velocity = root.AssemblyLinearVelocity
+                    root.AssemblyLinearVelocity = Vector3.new(
                         horizontal.X * targetSpeed,
                         velocity.Y,
                         horizontal.Z * targetSpeed
-                    ))
+                    )
                 end
             end
         end
@@ -5124,8 +4925,7 @@ local function SetupMovementPage()
             end
 
             MovementState.SpinAngle = (MovementState.SpinAngle + math.rad(Config.SpinSpeed * 7.2) * direction * delta) % (math.pi * 2)
-            local movementPosition = GetMovementPosition(root)
-            SetMovementCFrame(root, CFrame.new(movementPosition) * CFrame.Angles(0, MovementState.SpinAngle, 0))
+            root.CFrame = CFrame.new(root.Position) * CFrame.Angles(0, MovementState.SpinAngle, 0)
             root.AssemblyAngularVelocity = Vector3.zero
         elseif Config.SpinEnabled and spinSuspended then
             MovementState.SpinActive = false
@@ -5141,8 +4941,7 @@ local function SetupMovementPage()
                 local horizontal = Vector3.new(move.X, 0, move.Z)
                 if horizontal.Magnitude > 0.05 then
                     horizontal = horizontal.Unit
-                    local movementPosition = GetMovementPosition(root)
-                    SetMovementCFrame(root, CFrame.lookAt(movementPosition, movementPosition + horizontal))
+                    root.CFrame = CFrame.lookAt(root.Position, root.Position + horizontal)
                     root.AssemblyAngularVelocity = Vector3.zero
                 end
             end
@@ -5168,7 +4967,7 @@ do
         ShowNickname = true,
         ShowFPS = true,
         ShowPing = true,
-        WatermarkScale = 0.52,
+        WatermarkScale = WATERMARK_DEVICE_SCALE,
         WalkSpeedEnabled = false,
         WalkSpeedValue = 16,
         LongJumpEnabled = false,
@@ -5204,7 +5003,6 @@ do
             ShowNickname = Config.WatermarkOptions.ShowNickname,
             ShowFPS = Config.WatermarkOptions.ShowFPS,
             ShowPing = Config.WatermarkOptions.ShowPing,
-            WatermarkScale = Config.WatermarkScale,
             WalkSpeedEnabled = Config.WalkSpeedEnabled,
             WalkSpeedValue = Config.WalkSpeedValue,
             LongJumpEnabled = Config.LongJumpEnabled,
@@ -5242,7 +5040,7 @@ do
         Config.WatermarkOptions.ShowNickname = snapshot.ShowNickname
         Config.WatermarkOptions.ShowFPS = snapshot.ShowFPS
         Config.WatermarkOptions.ShowPing = snapshot.ShowPing
-        Config.WatermarkScale = math.clamp(snapshot.WatermarkScale or 0.52, 0.30, 1.20)
+        Config.WatermarkScale = WATERMARK_DEVICE_SCALE
 
         Config.WalkSpeedEnabled = snapshot.WalkSpeedEnabled == true
         Config.WalkSpeedValue = math.clamp(snapshot.WalkSpeedValue or 16, 1, 100)
@@ -5276,7 +5074,6 @@ do
         UIControls.WatermarkNickname:SetInstant(Config.WatermarkOptions.ShowNickname, false)
         UIControls.WatermarkFPS:SetInstant(Config.WatermarkOptions.ShowFPS, false)
         UIControls.WatermarkPing:SetInstant(Config.WatermarkOptions.ShowPing, false)
-        UIControls.WatermarkScale:Set(Config.WatermarkScale, false)
 
         if UIControls.WalkSpeedSwitch then UIControls.WalkSpeedSwitch:SetInstant(Config.WalkSpeedEnabled, false) end
         if UIControls.LongJumpSwitch then UIControls.LongJumpSwitch:SetInstant(Config.LongJumpEnabled, false) end
@@ -5302,7 +5099,7 @@ do
         if UIControls.SetCoinFarmSpeed then UIControls.SetCoinFarmSpeed(Config.CoinFarmSpeed) end
 
         if UIControls.WatermarkScaleObject then
-            UIControls.WatermarkScaleObject.Scale = Config.WatermarkScale
+            UIControls.WatermarkScaleObject.Scale = WATERMARK_DEVICE_SCALE
         end
 
         if SetWatermarkEnabled then
@@ -5967,7 +5764,8 @@ CrashDescription.Parent = CrashButton
 --// ============================================================
 
 local Watermark = New("TextButton", {
-    Position = UDim2.fromOffset(8, 8),
+    AnchorPoint = IsDesktop and Vector2.new(0.5, 0) or Vector2.new(0, 0),
+    Position = IsDesktop and UDim2.new(0.5, 0, 0, 8) or UDim2.fromOffset(8, 8),
     Size = UDim2.fromOffset(332, 48),
     BackgroundColor3 = Color3.fromRGB(42, 54, 74),
     BackgroundTransparency = 0.18,
@@ -5983,7 +5781,7 @@ Watermark.Parent = Gui
 Corner(Watermark, 14)
 local WatermarkStroke = Stroke(Watermark, Color3.fromRGB(78, 93, 117), 0.12, 1)
 
-UIControls.WatermarkScaleObject = New("UIScale", { Scale = Config.WatermarkScale })
+UIControls.WatermarkScaleObject = New("UIScale", { Scale = WATERMARK_DEVICE_SCALE })
 UIControls.WatermarkScaleObject.Parent = Watermark
 
 local WatermarkGradient = New("UIGradient", {
@@ -6194,6 +5992,7 @@ WatermarkShimmerGradient.Parent = WatermarkShimmer
 local WatermarkDragState = { Dragging = false, DragInput = nil, DragStart = nil, StartPosition = nil }
 
 Connect(Watermark.InputBegan, function(input)
+    if IsDesktop then return end
     if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
         WatermarkDragState.Dragging = true
         WatermarkDragState.DragStart = input.Position
@@ -6202,12 +6001,14 @@ Connect(Watermark.InputBegan, function(input)
 end)
 
 Connect(Watermark.InputChanged, function(input)
+    if IsDesktop then return end
     if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
         WatermarkDragState.DragInput = input
     end
 end)
 
 Connect(UserInputService.InputChanged, function(input)
+    if IsDesktop then return end
     if not WatermarkDragState.Dragging or input ~= WatermarkDragState.DragInput then return end
     local delta = input.Position - WatermarkDragState.DragStart
     Watermark.Position = UDim2.new(
@@ -6292,6 +6093,8 @@ Connect(RunService.RenderStepped, function()
 end)
 
 --// ============================================================
+Config.WatermarkScale = WATERMARK_DEVICE_SCALE
+
 --// SMOOTH MENU <-> WATERMARK TRANSITION
 --// ============================================================
 
@@ -6306,11 +6109,11 @@ local function ShowWatermarkAnimated()
 
     RefreshWatermarkText()
     Watermark.Visible = true
-    UIControls.WatermarkScaleObject.Scale = Config.WatermarkScale * 0.86
+    UIControls.WatermarkScaleObject.Scale = WATERMARK_DEVICE_SCALE * 0.86
     Watermark.BackgroundTransparency = 1
     WatermarkStroke.Transparency = 1
 
-    Tween(UIControls.WatermarkScaleObject, 0.22, { Scale = Config.WatermarkScale }, Enum.EasingStyle.Back)
+    Tween(UIControls.WatermarkScaleObject, 0.22, { Scale = WATERMARK_DEVICE_SCALE }, Enum.EasingStyle.Back)
     Tween(Watermark, 0.22, { BackgroundTransparency = 0.18 })
     Tween(WatermarkStroke, 0.22, { Transparency = 0.12 })
 end
@@ -6321,7 +6124,7 @@ local function HideWatermarkAnimated(callback)
         return
     end
 
-    Tween(UIControls.WatermarkScaleObject, 0.17, { Scale = Config.WatermarkScale * 0.82 })
+    Tween(UIControls.WatermarkScaleObject, 0.17, { Scale = WATERMARK_DEVICE_SCALE * 0.82 })
     Tween(Watermark, 0.17, { BackgroundTransparency = 1 })
     Tween(WatermarkStroke, 0.17, { Transparency = 1 })
 
@@ -6386,7 +6189,9 @@ SetWatermarkEnabled = function(value)
     end
 end
 
-Connect(Watermark.MouseButton1Click, OpenMenu)
+if not IsDesktop then
+    Connect(Watermark.MouseButton1Click, OpenMenu)
+end
 Connect(CloseButton.MouseButton1Click, CloseMenu)
 
 Connect(UserInputService.InputBegan, function(input, processed)
@@ -6745,25 +6550,12 @@ local function RunYARHMFling(targetPlayer, generation, roleName)
         end
 
         if root and root.Parent and LocalPlayer.Character == character then
-            local finalReturnPivot = returnPivot * CFrame.new(0, 0.5, 0)
-
             pcall(function()
                 root.AssemblyLinearVelocity = Vector3.zero
                 root.AssemblyAngularVelocity = Vector3.zero
-                character:PivotTo(finalReturnPivot)
+                character:PivotTo(returnPivot * CFrame.new(0, 0.5, 0))
                 humanoid:ChangeState(Enum.HumanoidStateType.GettingUp)
             end)
-
-            -- Some fling movers/physics ownership changes settle one task step
-            -- later. Re-assert the return once while Anti Aim is still suspended.
-            task.wait()
-            if root.Parent and LocalPlayer.Character == character then
-                pcall(function()
-                    root.AssemblyLinearVelocity = Vector3.zero
-                    root.AssemblyAngularVelocity = Vector3.zero
-                    character:PivotTo(finalReturnPivot)
-                end)
-            end
         end
     end
 
@@ -6916,16 +6708,6 @@ UIControls.FlingRole = function(roleName)
     end
 
     UIControls.FlingBusy = true
-
-    -- Anti Aim and Fling both manipulate HumanoidRootPart. Suspend only the
-    -- spoofing part for the short fling window; the Anti Aim setting stays ON
-    -- and automatically resumes after the return teleport finishes.
-    if UIControls.SuspendDesyncAntiAim then
-        pcall(function()
-            UIControls.SuspendDesyncAntiAim(true)
-        end)
-    end
-
     UIControls.FlingGeneration = UIControls.FlingGeneration + 1
     local generation = UIControls.FlingGeneration
 
@@ -6936,16 +6718,7 @@ UIControls.FlingRole = function(roleName)
     task.spawn(function()
         local ok, err = RunYARHMFling(target, generation, roleName)
         if generation == UIControls.FlingGeneration then
-            -- RunYARHMFling has already restored returnPivot at this point.
-            -- Release Fling ownership first, then allow Anti Aim to resume from
-            -- the returned position instead of an old target-side snapshot.
             UIControls.FlingBusy = false
-            if UIControls.SuspendDesyncAntiAim then
-                pcall(function()
-                    UIControls.SuspendDesyncAntiAim(false)
-                end)
-            end
-
             if UIControls.CombatStatus then
                 if ok then
                     UIControls.CombatStatus.Text = "Fling finished • returned"
