@@ -15,9 +15,6 @@ local Debris = game:GetService("Debris")
 local LocalPlayer = Players.LocalPlayer
 local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
 
-local IsDesktop = UserInputService.KeyboardEnabled and UserInputService.MouseEnabled
-local WATERMARK_DEVICE_SCALE = IsDesktop and 1.20 or 0.75
-
 --// ============================================================
 --// CLEAN OLD VAFLEX
 --// ============================================================
@@ -2539,7 +2536,7 @@ UIControls.SetupMyESPSection = function()
         Position = UDim2.fromOffset(13, 0),
         Size = UDim2.new(1, -80, 1, 0),
         BackgroundTransparency = 1,
-        Text = "Show Ping Estimate",
+        Text = "Show Ping Hitbox",
         TextColor3 = Config.Text,
         TextSize = 10,
         Font = Enum.Font.GothamSemibold,
@@ -2858,7 +2855,7 @@ UIControls.SetupMyESPSection = function()
             "MyPingGhost",
             character,
             Color3.fromRGB(255, 215, 80),
-            "PING ESTIMATE"
+            "PING HITBOX"
         )
 
         updateGhost(
@@ -2866,7 +2863,7 @@ UIControls.SetupMyESPSection = function()
             character,
             root,
             pingCFrame,
-            string.format("PING ESTIMATE • %.0f ms", ping * 1000)
+            string.format("PING HITBOX • %.0f ms", ping * 1000)
         )
 
         setGhostVisible("MyPingGhost", true)
@@ -3056,7 +3053,7 @@ WatermarkSettingsShade.Parent = Main
 local WatermarkSettingsPanel = New("Frame", {
     AnchorPoint = Vector2.new(0.5, 0.5),
     Position = UDim2.fromScale(0.5, 0.5),
-    Size = UDim2.fromOffset(270, 218),
+    Size = UDim2.fromOffset(270, 270),
     BackgroundColor3 = Color3.fromRGB(24, 30, 42),
     BackgroundTransparency = 0.03,
     BorderSizePixel = 0,
@@ -3137,6 +3134,143 @@ UIControls.WatermarkPing = CreateOptionRow(
     function(value) Config.WatermarkOptions.ShowPing = value end
 )
 
+do
+local function CreateScaleSlider(parent, y, defaultValue, callback)
+    local MinScale = 0.30
+    local MaxScale = 1.20
+    local current = math.clamp(defaultValue, MinScale, MaxScale)
+    local dragging = false
+
+    local Row = New("Frame", {
+        Position = UDim2.fromOffset(12, y),
+        Size = UDim2.new(1, -24, 0, 49),
+        BackgroundColor3 = Config.Panel2,
+        BackgroundTransparency = 0.07,
+        BorderSizePixel = 0,
+        ZIndex = 331,
+    })
+    Row.Parent = parent
+    Corner(Row, 11)
+
+    local Title = New("TextLabel", {
+        Position = UDim2.fromOffset(12, 5),
+        Size = UDim2.new(1, -75, 0, 16),
+        BackgroundTransparency = 1,
+        Text = "Scale",
+        TextColor3 = Config.Text,
+        TextSize = 8,
+        Font = Enum.Font.GothamSemibold,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        ZIndex = 332,
+    })
+    Title.Parent = Row
+
+    local ValueLabel = New("TextLabel", {
+        AnchorPoint = Vector2.new(1, 0),
+        Position = UDim2.new(1, -12, 0, 5),
+        Size = UDim2.fromOffset(58, 16),
+        BackgroundTransparency = 1,
+        Text = tostring(math.floor(current * 100 + 0.5)) .. "%",
+        TextColor3 = Config.WaterBright,
+        TextSize = 8,
+        Font = Enum.Font.GothamBold,
+        TextXAlignment = Enum.TextXAlignment.Right,
+        ZIndex = 332,
+    })
+    ValueLabel.Parent = Row
+
+    local Track = New("TextButton", {
+        Position = UDim2.fromOffset(12, 30),
+        Size = UDim2.new(1, -24, 0, 6),
+        BackgroundColor3 = Color3.fromRGB(55, 64, 79),
+        BorderSizePixel = 0,
+        Text = "",
+        AutoButtonColor = false,
+        ZIndex = 332,
+    })
+    Track.Parent = Row
+    Corner(Track, 999)
+
+    local Fill = New("Frame", {
+        Size = UDim2.fromScale(0, 1),
+        BackgroundColor3 = Config.Water,
+        BorderSizePixel = 0,
+        ZIndex = 333,
+    })
+    Fill.Parent = Track
+    Corner(Fill, 999)
+
+    local Knob = New("Frame", {
+        AnchorPoint = Vector2.new(0.5, 0.5),
+        Position = UDim2.new(0, 0, 0.5, 0),
+        Size = UDim2.fromOffset(14, 14),
+        BackgroundColor3 = Config.WaterWhite,
+        BorderSizePixel = 0,
+        ZIndex = 334,
+    })
+    Knob.Parent = Track
+    Corner(Knob, 999)
+    Stroke(Knob, Config.Water, 0.18, 1)
+
+    local function Apply(value, triggerCallback)
+        current = math.clamp(value, MinScale, MaxScale)
+        local alpha = (current - MinScale) / (MaxScale - MinScale)
+        Fill.Size = UDim2.fromScale(alpha, 1)
+        Knob.Position = UDim2.new(alpha, 0, 0.5, 0)
+        ValueLabel.Text = tostring(math.floor(current * 100 + 0.5)) .. "%"
+        if triggerCallback ~= false then callback(current) end
+    end
+
+    local function ApplyFromX(x)
+        local width = math.max(1, Track.AbsoluteSize.X)
+        local alpha = math.clamp((x - Track.AbsolutePosition.X) / width, 0, 1)
+        Apply(MinScale + (MaxScale - MinScale) * alpha, true)
+    end
+
+    Connect(Track.InputBegan, function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            dragging = true
+            ApplyFromX(input.Position.X)
+        end
+    end)
+
+    Connect(UserInputService.InputChanged, function(input)
+        if not dragging then return end
+        if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
+            ApplyFromX(input.Position.X)
+        end
+    end)
+
+    Connect(UserInputService.InputEnded, function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            dragging = false
+        end
+    end)
+
+    Apply(current, false)
+
+    return {
+        Set = function(_, value, triggerCallback)
+            Apply(value, triggerCallback)
+        end,
+        Get = function()
+            return current
+        end,
+    }
+end
+
+UIControls.WatermarkScale = CreateScaleSlider(
+    WatermarkSettingsPanel,
+    209,
+    Config.WatermarkScale,
+    function(value)
+        Config.WatermarkScale = value
+        if UIControls.WatermarkScaleObject then
+            Tween(UIControls.WatermarkScaleObject, 0.12, { Scale = value }, Enum.EasingStyle.Sine)
+        end
+    end
+)
+end
 
 local WatermarkSettingsOpen = false
 
@@ -5753,8 +5887,7 @@ CrashDescription.Parent = CrashButton
 --// ============================================================
 
 local Watermark = New("TextButton", {
-    AnchorPoint = IsDesktop and Vector2.new(0.5, 0) or Vector2.new(0, 0),
-    Position = IsDesktop and UDim2.new(0.5, 0, 0, 8) or UDim2.fromOffset(8, 8),
+    Position = UDim2.fromOffset(8, 8),
     Size = UDim2.fromOffset(332, 48),
     BackgroundColor3 = Color3.fromRGB(42, 54, 74),
     BackgroundTransparency = 0.18,
@@ -5770,7 +5903,7 @@ Watermark.Parent = Gui
 Corner(Watermark, 14)
 local WatermarkStroke = Stroke(Watermark, Color3.fromRGB(78, 93, 117), 0.12, 1)
 
-UIControls.WatermarkScaleObject = New("UIScale", { Scale = WATERMARK_DEVICE_SCALE })
+UIControls.WatermarkScaleObject = New("UIScale", { Scale = Config.WatermarkScale })
 UIControls.WatermarkScaleObject.Parent = Watermark
 
 local WatermarkGradient = New("UIGradient", {
@@ -5981,7 +6114,6 @@ WatermarkShimmerGradient.Parent = WatermarkShimmer
 local WatermarkDragState = { Dragging = false, DragInput = nil, DragStart = nil, StartPosition = nil }
 
 Connect(Watermark.InputBegan, function(input)
-    if IsDesktop then return end
     if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
         WatermarkDragState.Dragging = true
         WatermarkDragState.DragStart = input.Position
@@ -5990,14 +6122,12 @@ Connect(Watermark.InputBegan, function(input)
 end)
 
 Connect(Watermark.InputChanged, function(input)
-    if IsDesktop then return end
     if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
         WatermarkDragState.DragInput = input
     end
 end)
 
 Connect(UserInputService.InputChanged, function(input)
-    if IsDesktop then return end
     if not WatermarkDragState.Dragging or input ~= WatermarkDragState.DragInput then return end
     local delta = input.Position - WatermarkDragState.DragStart
     Watermark.Position = UDim2.new(
@@ -6096,11 +6226,11 @@ local function ShowWatermarkAnimated()
 
     RefreshWatermarkText()
     Watermark.Visible = true
-    UIControls.WatermarkScaleObject.Scale = WATERMARK_DEVICE_SCALE * 0.86
+    UIControls.WatermarkScaleObject.Scale = Config.WatermarkScale * 0.86
     Watermark.BackgroundTransparency = 1
     WatermarkStroke.Transparency = 1
 
-    Tween(UIControls.WatermarkScaleObject, 0.22, { Scale = WATERMARK_DEVICE_SCALE }, Enum.EasingStyle.Back)
+    Tween(UIControls.WatermarkScaleObject, 0.22, { Scale = Config.WatermarkScale }, Enum.EasingStyle.Back)
     Tween(Watermark, 0.22, { BackgroundTransparency = 0.18 })
     Tween(WatermarkStroke, 0.22, { Transparency = 0.12 })
 end
@@ -6111,7 +6241,7 @@ local function HideWatermarkAnimated(callback)
         return
     end
 
-    Tween(UIControls.WatermarkScaleObject, 0.17, { Scale = WATERMARK_DEVICE_SCALE * 0.82 })
+    Tween(UIControls.WatermarkScaleObject, 0.17, { Scale = Config.WatermarkScale * 0.82 })
     Tween(Watermark, 0.17, { BackgroundTransparency = 1 })
     Tween(WatermarkStroke, 0.17, { Transparency = 1 })
 
@@ -6176,9 +6306,7 @@ SetWatermarkEnabled = function(value)
     end
 end
 
-if not IsDesktop then
-    Connect(Watermark.MouseButton1Click, OpenMenu)
-end
+Connect(Watermark.MouseButton1Click, OpenMenu)
 Connect(CloseButton.MouseButton1Click, CloseMenu)
 
 Connect(UserInputService.InputBegan, function(input, processed)
